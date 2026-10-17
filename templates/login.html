@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% if first_run %}Set up Homestock{% else %}Sign in · Homestock{% endif %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="min-h-dvh bg-bg text-ink font-sans grid place-items-center p-4">
+  <main class="w-full max-w-[400px] flex flex-col gap-5">
+    <header class="text-center">
+      <span class="mx-auto mb-4 grid size-14 place-items-center rounded-2xl bg-accent text-accent-fg text-2xl font-bold">H</span>
+      <h1 class="text-2xl font-bold">{% if first_run %}Set up Homestock{% else %}Sign in to Homestock{% endif %}</h1>
+      <p class="mt-1 text-ink-2">Our home · homestock.local</p>
+    </header>
+    {% if let Some(message) = error %}<p role="alert" class="rounded-xl bg-gone-soft p-3 text-gone">{{ message }}</p>{% endif %}
+    {% if first_run %}
+    <form method="post" action="/setup" class="flex flex-col gap-3">
+      <label class="flex flex-col gap-1.5 font-medium">Your name<input class="h-[52px] rounded-btn border border-line-strong bg-surface px-3 text-base" name="name" required maxlength="60" autocomplete="name"></label>
+      <label class="flex flex-col gap-1.5 font-medium">Password<input class="h-[52px] rounded-btn border border-line-strong bg-surface px-3 text-base" type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+      <label class="flex flex-col gap-1.5 font-medium">Confirm password<input class="h-[52px] rounded-btn border border-line-strong bg-surface px-3 text-base" type="password" name="confirm" required minlength="8" autocomplete="new-password"></label>
+      <button class="mt-2 h-14 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">Create household admin</button>
+    </form>
+    {% else %}
+    <form method="post" action="/login" class="flex flex-col gap-3">
+      <label class="flex flex-col gap-1.5 font-medium">Who’s signing in?
+        <select class="h-[52px] rounded-btn border border-line-strong bg-surface px-3 text-base" name="name" required>
+          {% for name in names %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="flex flex-col gap-1.5 font-medium">Password<input class="h-[52px] rounded-btn border border-line-strong bg-surface px-3 text-base" type="password" name="password" required autocomplete="current-password"></label>
+      <button class="mt-2 h-14 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">Sign in</button>
+    </form>
+    <p class="text-center text-sm text-ink-3">Forgot your password? Ask an admin to reset it under Household.</p>
+    {% endif %}
+  </main>
+</body>
+</html>

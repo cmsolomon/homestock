@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}In use · Homestock{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-[900px] flex flex-col gap-5">
+  <header><div class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Inventory</div><h1 class="mt-0.5 text-[26px] font-bold">In use</h1><p class="mt-1 text-[13px] text-ink-2">Items currently checked out by household members.</p></header>
+  {% if !entries.is_empty() %}
+  <div class="flex flex-col gap-2">
+    {% for entry in entries %}
+    <article class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3">
+      <div class="min-w-0 flex-1"><h2 class="font-semibold">{{ entry.item }}</h2><p class="text-sm text-ink-2">{{ entry.person }} · {{ entry.location }} · <span class="tabular-nums">{{ entry.qty }} {{ entry.unit }}</span></p></div>
+      <form method="post" action="/checkouts/{{ entry.id }}/return"><button class="h-11 rounded-btn border border-line-strong px-4 font-semibold whitespace-nowrap">Return</button></form>
+      <form method="post" action="/checkouts/{{ entry.id }}/reassign" class="flex gap-1"><select name="user_id" class="h-11 max-w-32 rounded-btn border border-line-strong bg-surface px-2">{% for person in people %}<option value="{{ person.id }}" {% if person.name == entry.person %}selected{% endif %}>{{ person.name }}</option>{% endfor %}</select><button class="h-11 rounded-btn border border-line-strong px-3 font-semibold whitespace-nowrap">Reassign</button></form>
+      <form method="post" action="/checkouts/{{ entry.id }}/put-away" class="flex gap-1"><select name="location_id" class="h-11 max-w-36 rounded-btn border border-line-strong bg-surface px-2">{% for place in destinations %}<option value="{{ place.id }}">{{ place.name }}</option>{% endfor %}</select><button class="h-11 rounded-btn border border-line-strong px-3 font-semibold whitespace-nowrap">Put away</button></form>
+      <form method="post" action="/checkouts/{{ entry.id }}/consume"><label class="flex h-11 items-center gap-2 px-2 text-xs"><input type="checkbox" name="add_to_list" value="yes" class="size-4 accent-accent">Add to list</label><button class="h-11 rounded-btn border border-line-strong px-3 font-semibold text-gone whitespace-nowrap">Used up</button></form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="rounded-[22px] border-[1.5px] border-dashed border-line-strong px-6 py-11 text-center"><h2 class="font-bold text-[17px]">Nothing is checked out</h2><p class="mt-2 text-ink-2">Check out an item from its detail panel and it will appear here.</p></div>
+  {% endif %}
+</div>
+{% endblock %}

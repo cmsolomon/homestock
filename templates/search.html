@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Search · Homestock{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-[900px] flex flex-col gap-5">
+  <header><div class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Inventory</div><h1 class="mt-0.5 text-[26px] font-bold">Search</h1></header>
+  <form method="get" action="/search" class="flex gap-2">
+    <input name="q" value="{{ query }}" placeholder="Search items, tags, places — typos are fine" autofocus class="h-[52px] min-w-0 flex-1 rounded-btn border border-line-strong bg-surface px-4 text-base">
+    {% if !status.is_empty() %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    <button class="h-[52px] rounded-btn bg-accent px-5 font-semibold text-accent-fg whitespace-nowrap">Search</button>
+  </form>
+  <nav aria-label="Filter by status" class="flex gap-2 overflow-x-auto">
+    <a href="/search?q={{ query }}" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if status.is_empty() %}bg-accent-soft text-accent{% endif %}">All</a>
+    <a href="/search?q={{ query }}&status=in-use" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if status == "in-use" %}bg-accent-soft text-accent{% endif %}">In use</a>
+    <a href="/search?q={{ query }}&status=low" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if status == "low" %}bg-accent-soft text-accent{% endif %}">Low stock</a>
+    <a href="/search?q={{ query }}&status=used" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if status == "used" %}bg-accent-soft text-accent{% endif %}">Used up</a>
+  </nav>
+  {% if !hits.is_empty() %}
+  <section class="flex flex-col gap-2" aria-label="Search results">
+    <h2 class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Items · {{ hits.len() }}</h2>
+    {% for hit in hits %}
+    <a href="/items/{{ hit.id }}" hx-get="/items/{{ hit.id }}" hx-target="#sheet" class="flex min-h-16 items-center gap-3 rounded-card border border-line bg-surface p-3 hover:border-line-strong">
+      <span class="min-w-0 flex-1"><span class="block font-semibold">{{ hit.name }}</span><span class="block truncate text-sm text-ink-3">{{ hit.path }}</span></span>
+      {% if hit.is_low %}<span class="rounded-full bg-low-soft px-2 py-1 text-xs font-semibold text-low whitespace-nowrap">Low stock</span>{% endif %}
+      {% if hit.is_used_up %}<span class="rounded-full bg-gone-soft px-2 py-1 text-xs font-semibold text-gone whitespace-nowrap">Used up</span>{% endif %}
+      <span class="rounded-full bg-surface-2 px-3 py-1 text-sm font-bold tabular-nums whitespace-nowrap">{{ hit.qty }} {{ hit.unit }}</span>
+    </a>
+    {% endfor %}
+  </section>
+  {% else if submitted %}
+  <div class="rounded-[22px] border-[1.5px] border-dashed border-line-strong px-6 py-10 text-center"><h2 class="font-bold text-[17px]">Nothing matches “{{ query }}”</h2><p class="mt-2 text-ink-2">Try a shorter word, a tag, or clear the filters.</p></div>
+  {% else %}
+  <p class="text-sm text-ink-2">Search item names, notes, tags and location paths. Typos are okay.</p>
+  {% endif %}
+</div>
+{% endblock %}

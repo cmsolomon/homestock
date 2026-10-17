@@ -1,0 +1,50 @@
+<div class="fixed inset-0 z-40 grid items-end bg-scrim sm:place-items-center" onclick="if(event.target===this) closeSheet()">
+  <section role="dialog" aria-modal="true" aria-labelledby="item-title" class="max-h-[92dvh] w-full overflow-auto rounded-t-[24px] bg-surface p-5 sm:max-w-[480px] sm:rounded-[24px]">
+    <div class="mx-auto mb-4 h-[5px] w-10 rounded-full bg-line-strong sm:hidden"></div>
+    <h2 id="item-title" class="text-xl font-bold">{{ name }}</h2>
+    <p class="mt-1 text-sm text-ink-2">{{ location }} · <span class="tabular-nums">{{ available }} available of {{ qty }} {{ unit }}</span></p>
+    <form method="post" action="/items/{{ id }}/update" class="mt-5 flex flex-col gap-3">
+      <label class="flex flex-col gap-1.5 font-medium">Name<input name="name" value="{{ name }}" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base"></label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="flex flex-col gap-1.5 font-medium">Quantity<input name="qty" type="number" min="0" value="{{ qty }}" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
+        <label class="flex flex-col gap-1.5 font-medium">Unit<input name="unit" value="{{ unit }}" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base"></label>
+      </div>
+      <label class="flex flex-col gap-1.5 font-medium">Low-stock alert<input name="min_qty" type="number" min="0" value="{{ min_qty }}" class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
+      <label class="flex flex-col gap-1.5 font-medium">Tags<input name="tags" value="{{ tags }}" placeholder="Comma separated" class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base"></label>
+      <label class="flex flex-col gap-1.5 font-medium">Notes<textarea name="notes" rows="3" class="rounded-btn border border-line-strong bg-bg px-3 py-2 text-base">{{ notes }}</textarea></label>
+      <button class="h-12 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">Save changes</button>
+    </form>
+    {% if available > 0 %}
+    <form method="post" action="/items/{{ id }}/checkout" class="mt-5 border-t border-line pt-4 flex flex-col gap-3">
+      <h3 class="font-bold">Check out</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="flex flex-col gap-1.5 font-medium">Quantity<input name="qty" type="number" min="1" max="{{ available }}" value="1" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
+        <label class="flex flex-col gap-1.5 font-medium">With
+          <select name="user_id" class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base">{% for person in people %}<option value="{{ person.id }}">{{ person.name }}</option>{% endfor %}</select>
+        </label>
+      </div>
+      <button class="h-12 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Check out</button>
+    </form>
+    {% endif %}
+    {% if available > 0 %}<form method="post" action="/items/{{ id }}/move" class="mt-5 border-t border-line pt-4 flex flex-col gap-3">
+      <h3 class="font-bold">Move</h3>
+      <label class="flex flex-col gap-1.5 font-medium">Destination
+        <select name="location_id" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base">{% for place in destinations %}<option value="{{ place.id }}" {% if place.id == location_id %}disabled{% endif %}>{{ place.name }}</option>{% endfor %}</select>
+      </label>
+      <label class="flex flex-col gap-1.5 font-medium">Quantity to move <span class="text-sm font-normal text-ink-3">Up to {{ available }} available</span><input name="qty" type="number" min="1" max="{{ available }}" value="{{ available }}" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
+      <button class="h-12 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Move item</button>
+    </form>{% endif %}
+    {% if available > 0 %}
+    <form method="post" action="/items/{{ id }}/consume" class="mt-5 border-t border-line pt-4 flex flex-col gap-3">
+      <h3 class="font-bold">Mark used</h3>
+      <label class="flex flex-col gap-1.5 font-medium">Quantity<input name="qty" type="number" min="1" max="{{ available }}" value="1" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
+      <label class="flex min-h-11 items-center gap-2.5"><input type="checkbox" name="add_to_list" value="yes" class="size-5 accent-accent"> Add to shopping list</label>
+      <button class="h-12 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Mark used</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/items/{{ id }}/delete" onsubmit="return confirm('Delete this item?')">
+      <button class="mt-5 h-12 w-full rounded-btn border border-gone text-gone font-semibold whitespace-nowrap">Delete item</button>
+    </form>
+    <button type="button" onclick="closeSheet()" class="mt-3 h-11 w-full rounded-btn text-ink-2 whitespace-nowrap">Close</button>
+  </section>
+</div>

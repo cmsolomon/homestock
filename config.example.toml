@@ -1,0 +1,25 @@
+bind     = "0.0.0.0:8080"
+data_dir = "/var/lib/homestock"        # homestock.sqlite3, photos/, staging/
+session_days = 30
+cookie_secure = true                # Set false only for local HTTP testing; keep true behind HTTPS.
+
+[backup]
+nas_dir            = "/mnt/nas"        # bind-mounted CIFS share (see IMPLEMENTATION.md §9)
+sentinel           = ".homestock-nas"  # must exist on the share, or backups are skipped
+idle_secs          = 300               # no requests for this long = idle
+min_interval_secs  = 1800              # at most one idle backup per 30 min
+max_interval_secs  = 86400             # force a backup daily if anything changed
+keep               = 48                # newest N backup files kept on the NAS
+stage_locally      = true              # backup to data_dir/staging then copy (recommended on CIFS)
+sync_photos        = true
+
+# Seeded only when the user table is empty. Seeded users must change their password at first sign-in.
+[[seed_users]]
+name     = "Alex"
+role     = "admin"
+password = "change-me-now"
+
+[[seed_users]]
+name     = "Sam"
+role     = "member"
+password = "change-me-too"

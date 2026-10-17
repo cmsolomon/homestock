@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-theme="{{ user.theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}Homestock{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+  <script>
+    // 'system' → follow the OS until the user picks light/dark (persisted per user via POST /me/theme)
+    if (document.documentElement.dataset.theme === 'system')
+      document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  </script>
+</head>
+<body class="bg-bg text-ink font-sans text-sm antialiased" hx-headers='{"X-Requested-With":"htmx"}'>
+  <div class="flex h-dvh overflow-hidden">
+    <!-- Sidebar: persistent ≥1024, off-canvas drawer below (toggle via app.js) -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-30 w-64 -translate-x-full bg-surface border-r border-line flex flex-col transition-transform lg:static lg:translate-x-0">
+      <div class="flex items-center gap-2.5 px-4 pt-4 pb-3"><span class="size-6.5 rounded-[9px] bg-accent"></span><span class="font-bold text-base">Homestock</span></div>
+      <div class="px-3 pb-3 flex flex-col gap-2">
+        <a href="/quick-add" class="h-11 rounded-btn bg-accent text-accent-fg font-semibold flex items-center justify-center gap-2 whitespace-nowrap">+ Quick add</a>
+        <a href="/search" class="h-10 rounded-xl border border-line bg-bg text-ink-3 text-[13px] flex items-center justify-between px-3">Search items, tags… <kbd class="text-[11px] border border-line-strong rounded-md px-1.5">/</kbd></a>
+      </div>
+      <nav class="px-2 flex flex-col gap-0.5">
+        <a href="/loc" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Places</a>
+        <a href="/shopping" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Shopping list</a>
+        <a href="/in-use" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">In use</a>
+        <a href="/household" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Household</a>
+      </nav>
+      <div class="mx-4 mt-5 mb-1.5 text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Locations</div>
+      <a href="/loc" class="mx-2 mb-2 h-10 px-3 rounded-xl flex items-center text-ink-2 hover:bg-surface-2">All locations</a>
+      <div class="border-t border-line px-3 py-2.5 flex gap-2">
+        <form class="flex-1" method="post" action="/logout"><button class="w-full h-10 rounded-xl border border-line-strong text-[13px] font-medium whitespace-nowrap">Sign out</button></form>
+        <a href="/account" class="flex-1 h-10 rounded-xl border border-line-strong grid place-items-center text-[13px] font-medium">Account</a>
+      </div>
+    </aside>
+
+    <main class="flex-1 min-w-0 flex flex-col">
+      <div class="flex-1 overflow-auto px-4 pt-4 pb-7 md:px-6 md:pb-24 lg:px-9 lg:pt-7 lg:pb-12">
+        {% block content %}{% endblock %}
+      </div>
+      <!-- Mobile tab bar (<640) -->
+      <nav class="sm:hidden h-17 grid grid-cols-5 items-center border-t border-line bg-surface">
+        <a href="/loc" class="grid h-full place-items-center text-xs font-medium">Places</a>
+        <a href="/in-use" class="grid h-full place-items-center text-xs font-medium">In use</a>
+        <a href="/quick-add" class="mx-auto grid size-12 place-items-center rounded-full bg-accent text-accent-fg text-2xl" aria-label="Quick add">+</a>
+        <a href="/shopping" class="grid h-full place-items-center text-xs font-medium">List</a>
+        <a href="/search" class="grid h-full place-items-center text-xs font-medium">Search</a>
+      </nav>
+    </main>
+  </div>
+  <div id="sheet"></div>
+  <div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-21 sm:bottom-6 z-50" aria-live="polite"></div>
+</body>
+</html>

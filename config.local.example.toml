@@ -1,0 +1,14 @@
+bind = "127.0.0.1:8080"
+data_dir = "/tmp/homestock-local-data"
+session_days = 30
+cookie_secure = false
+
+[backup]
+nas_dir = "/tmp/homestock-local-nas"
+sentinel = ".homestock-nas"
+idle_secs = 300
+min_interval_secs = 1800
+max_interval_secs = 86400
+keep = 48
+stage_locally = true
+sync_photos = true

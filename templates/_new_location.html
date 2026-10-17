@@ -1,0 +1,19 @@
+<div class="fixed inset-0 z-40 grid items-end bg-scrim sm:place-items-center" onclick="if(event.target===this) closeSheet()">
+  <section role="dialog" aria-modal="true" aria-labelledby="new-location-title" class="w-full rounded-t-[24px] bg-surface p-5 sm:max-w-[480px] sm:rounded-[24px]">
+    <div class="mx-auto mb-4 h-[5px] w-10 rounded-full bg-line-strong sm:hidden"></div>
+    <h2 id="new-location-title" class="text-lg font-bold">{% if let Some(parent) = parent_id %}Add a box inside {{ parent_name }}{% else %}Add a room{% endif %}</h2>
+    <form method="post" action="{% if let Some(parent) = parent_id %}/loc/{{ parent }}{% else %}/loc{% endif %}" class="mt-4 flex flex-col gap-3">
+      <label class="flex flex-col gap-1.5 font-medium">Name<input name="name" required maxlength="100" autofocus class="h-[52px] rounded-btn border border-line-strong bg-bg px-3 text-base"></label>
+      <label class="flex flex-col gap-1.5 font-medium">Type
+        <select name="kind" class="h-[52px] rounded-btn border border-line-strong bg-bg px-3 text-base">
+          {% if parent_id.is_none() %}<option>Room</option>{% endif %}
+          <option>Box</option><option>Cupboard</option><option>Shelf</option><option>Bin</option><option>Drawers</option>
+        </select>
+      </label>
+      <div class="mt-2 flex gap-2">
+        <button class="h-12 flex-1 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">Create location</button>
+        <button type="button" onclick="closeSheet()" class="h-12 px-4 rounded-btn border border-line-strong font-medium whitespace-nowrap">Cancel</button>
+      </div>
+    </form>
+  </section>
+</div>

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}All locations · Homestock{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-[1280px] flex flex-col gap-5">
+  <header class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <div class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Your home</div>
+      <h1 class="mt-0.5 text-[26px] leading-tight tracking-[-.02em] font-bold">All locations</h1>
+      <p class="mt-1 text-[13px] text-ink-2">{{ meta }}</p>
+    </div>
+    <button hx-get="/loc/new" hx-target="#sheet" class="h-11 px-4 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">+ Add room</button>
+  </header>
+  {% if !boxes.is_empty() %}
+  <section class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))]">
+    {% for b in boxes %}
+    <a href="/loc/{{ b.id }}" class="flex items-center gap-3 rounded-card border border-line bg-surface p-3 hover:border-line-strong hover:shadow-md">
+      <span class="grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl placeholder-stripes text-[10px] text-ink-3">
+        {% if let Some(photo) = b.photo %}<img src="/{{ photo }}" alt="" class="size-full object-cover">{% else %}{{ b.kind }}{% endif %}
+      </span>
+      <span class="min-w-0 flex-1">
+        <span class="block truncate font-semibold">{{ b.name }}</span>
+        <span class="block text-xs text-ink-3 tabular-nums">{{ b.meta }}</span>
+      </span>
+      <span class="text-ink-3 text-lg">›</span>
+    </a>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section class="rounded-[22px] border-[1.5px] border-dashed border-line-strong px-6 py-11 flex flex-col items-center text-center gap-2.5">
+    <h2 class="font-bold text-[17px]">Start with a room</h2>
+    <p class="max-w-[380px] text-ink-2">Create a location such as Kitchen, Garage or Bedroom. You can add nested boxes and shelves inside it.</p>
+    <button hx-get="/loc/new" hx-target="#sheet" class="mt-1 h-11 px-4 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">Add your first room</button>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

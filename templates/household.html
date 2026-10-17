@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Household · Homestock{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-[900px] flex flex-col gap-5">
+  <header><div class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Settings</div><h1 class="mt-0.5 text-[26px] font-bold">Household &amp; users</h1><p class="mt-1 text-sm text-ink-2">Manage who can access your home inventory.</p></header>
+  <section class="flex flex-col gap-2">
+    {% for member in members %}
+    <article class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3">
+      <div class="min-w-0 flex-1"><h2 class="font-semibold">{{ member.name }}{% if member.id == user.id %} (you){% endif %}</h2><p class="text-sm text-ink-2 capitalize">{{ member.role }} · {% if member.checkouts == 0 %}Nothing checked out{% else %}{{ member.checkouts }} checked out{% endif %}</p>{% if member.must_change %}<p class="text-xs text-low">Temporary password</p>{% endif %}</div>
+      {% if user.is_admin && member.id != user.id %}
+      <form method="post" action="/users/{{ member.id }}/reset"><button class="min-h-11 rounded-btn border border-line-strong px-3 text-sm font-semibold whitespace-nowrap">Reset password</button></form>
+      <form method="post" action="/users/{{ member.id }}/role"><input type="hidden" name="role" value="{% if member.role == "admin" %}member{% else %}admin{% endif %}"><button class="min-h-11 rounded-btn border border-line-strong px-3 text-sm font-semibold whitespace-nowrap">Make {% if member.role == "admin" %}member{% else %}admin{% endif %}</button></form>
+      <form method="post" action="/users/{{ member.id }}/remove"><button class="min-h-11 px-3 text-sm font-semibold text-gone whitespace-nowrap">Remove</button></form>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+  {% if user.is_admin %}
+  <section class="rounded-card border border-line bg-surface p-4"><h2 class="font-bold">Add a household member</h2>
+    <form method="post" action="/users" class="mt-3 flex flex-wrap gap-2">
+      <input name="name" required maxlength="60" placeholder="Name" class="h-12 min-w-40 flex-1 rounded-btn border border-line-strong bg-bg px-3 text-base">
+      <select name="role" class="h-12 rounded-btn border border-line-strong bg-bg px-3 text-base"><option value="member">Member</option><option value="admin">Admin</option></select>
+      <button class="h-12 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Add member</button>
+    </form>
+  </section>
+  {% else %}<p class="text-sm text-ink-2">Only admins can add, remove or reset members.</p>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Shopping list · Homestock{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-[900px] flex flex-col gap-5">
+  <header class="flex flex-wrap items-end justify-between gap-3"><div><div class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Household</div><h1 class="mt-0.5 text-[26px] font-bold">Shopping list</h1><p class="mt-1 text-[13px] text-ink-2">{{ buy_count }} to buy · tick when bought, then put away to restock</p></div><button onclick="shareList()" {% if buy_count == 0 %}disabled{% endif %} class="h-11 rounded-btn bg-accent px-4 font-semibold text-accent-fg disabled:opacity-45 whitespace-nowrap">Share list</button></header>
+  <nav class="flex gap-2 overflow-x-auto" aria-label="Shopping list sections">
+    <a href="/shopping?tab=buy" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if tab == "buy" %}bg-accent-soft text-accent{% endif %}">To buy · {{ buy_count }}</a>
+    <a href="/shopping?tab=bought" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if tab == "bought" %}bg-accent-soft text-accent{% endif %}">Bought · {{ bought_count }}</a>
+    <a href="/shopping?tab=low" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if tab == "low" %}bg-accent-soft text-accent{% endif %}">Low stock · {{ low_count }}</a>
+    <a href="/shopping?tab=used" class="rounded-full border border-line px-4 py-2 text-sm whitespace-nowrap {% if tab == "used" %}bg-accent-soft text-accent{% endif %}">Used up · {{ used_count }}</a>
+  </nav>
+  {% if tab == "buy" %}
+  <form method="post" action="/shopping" class="flex gap-2"><input name="name" required placeholder="Add something to buy" class="h-12 min-w-0 flex-1 rounded-btn border border-line-strong bg-surface px-3 text-base"><button class="h-12 rounded-btn bg-accent px-5 font-semibold text-accent-fg whitespace-nowrap">Add</button></form>
+  {% for row in rows %}{% if !row.bought %}
+  <article class="flex min-h-[60px] items-center gap-3 rounded-card border border-line bg-surface p-3">
+    <form method="post" action="/shopping/{{ row.id }}/toggle"><button aria-label="Mark {{ row.name }} bought" class="grid size-11 place-items-center rounded-xl border border-line-strong text-lg">□</button></form>
+    <div class="min-w-0 flex-1"><h2 class="font-semibold">{{ row.name }}</h2><p class="truncate text-sm text-ink-3">{% if let Some(location) = row.location %}Restocks {{ location }}{% else %}Not linked to an item{% endif %}</p></div>
+    <span class="rounded-full bg-surface-2 px-3 py-1 text-sm font-bold tabular-nums whitespace-nowrap">Buy {{ row.qty }} {{ row.unit }}</span>
+    <form method="post" action="/shopping/{{ row.id }}/remove"><button class="min-h-11 px-2 text-sm font-semibold text-gone whitespace-nowrap">Not buying</button></form>
+  </article>
+  {% endif %}{% endfor %}
+  {% else if tab == "bought" %}
+  {% for row in rows %}{% if row.bought %}
+  <article class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3">
+    <form method="post" action="/shopping/{{ row.id }}/toggle"><button aria-label="Move {{ row.name }} back to To buy" class="grid size-11 place-items-center rounded-xl bg-accent text-accent-fg text-lg">✓</button></form>
+    <div class="min-w-0 flex-1"><h2 class="font-semibold line-through text-ink-3">{{ row.name }}</h2><p class="text-sm text-ink-3 tabular-nums">{{ row.qty }} {{ row.unit }}</p></div>
+    <form method="post" action="/shopping/{{ row.id }}/restock" class="flex gap-2">
+      {% if row.item_id.is_some() %}<button class="min-h-11 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Put away in {{ row.location.as_deref().unwrap_or("location") }}</button>
+      {% else %}<label class="flex items-center gap-2"><select name="location_id" required class="h-11 max-w-36 rounded-btn border border-line-strong bg-surface px-2">{% for location in locations %}<option value="{{ location.id }}">{{ location.name }}</option>{% endfor %}</select><button class="min-h-11 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Put away</button></label>{% endif %}
+    </form>
+  </article>
+  {% endif %}{% endfor %}
+  {% else %}
+  {% for row in stock %}
+  <article class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3">
+    <div class="min-w-0 flex-1"><h2 class="font-semibold">{{ row.name }}</h2><p class="text-sm text-ink-3"><span class="tabular-nums">{{ row.available }} {{ row.unit }} left</span> · {{ row.location }}</p></div>
+    {% if row.listed %}<span class="text-sm font-semibold text-ok">On the list</span>{% else %}<form method="post" action="/shopping/from-item/{{ row.id }}"><button class="min-h-11 rounded-btn border border-line-strong px-4 font-semibold whitespace-nowrap">Add to list</button></form>{% endif %}
+  </article>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

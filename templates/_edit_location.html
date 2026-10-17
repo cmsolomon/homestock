@@ -1,0 +1,18 @@
+<div class="fixed inset-0 z-40 grid items-end bg-scrim sm:place-items-center" onclick="if(event.target===this) closeSheet()">
+  <section role="dialog" aria-modal="true" aria-labelledby="edit-location-title" class="w-full rounded-t-[24px] bg-surface p-5 sm:max-w-[480px] sm:rounded-[24px]">
+    <div class="mx-auto mb-4 h-[5px] w-10 rounded-full bg-line-strong sm:hidden"></div>
+    <h2 id="edit-location-title" class="text-lg font-bold">Rename {{ kind | lower }}</h2>
+    <form method="post" action="/loc/{{ id }}/rename" class="mt-4 flex flex-col gap-3">
+      <label class="flex flex-col gap-1.5 font-medium">Name<input name="name" value="{{ name }}" required maxlength="100" autofocus class="h-[52px] rounded-btn border border-line-strong bg-bg px-3 text-base"></label>
+      <button class="h-12 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">Save name</button>
+    </form>
+    <div class="mt-5 border-t border-line pt-4">
+      <h3 class="font-semibold">Delete {{ kind | lower }}</h3>
+      <p class="mt-1 text-sm text-ink-2">A location can only be deleted when it has no items or child locations.</p>
+      <form method="post" action="/loc/{{ id }}/delete" onsubmit="return confirm('Delete this location? It must be empty.')">
+        <button class="mt-3 h-12 w-full rounded-btn border border-gone text-gone font-semibold whitespace-nowrap">Delete location</button>
+      </form>
+    </div>
+    <button type="button" onclick="closeSheet()" class="mt-3 h-11 w-full rounded-btn text-ink-2 whitespace-nowrap">Cancel</button>
+  </section>
+</div>

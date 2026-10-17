@@ -1,0 +1,107 @@
+<!-- Quick add, variant A (sheet form). Loaded into #sheet via hx-get="/loc/{id}/quick-add". -->
+<div class="fixed inset-0 z-40 bg-scrim" onclick="closeSheet()"></div>
+<section role="dialog" aria-label="Quick add"
+         class="fixed z-41 inset-x-0 bottom-0 top-6 rounded-t-sheet sm:inset-auto sm:top-3 sm:right-3 sm:bottom-3 sm:w-[min(440px,calc(100%-24px))] sm:rounded-sheet
+                bg-surface border border-line shadow-xl flex flex-col overflow-hidden">
+  <div class="sm:hidden mx-auto mt-2 h-1.25 w-10 rounded-full bg-line-strong"></div>
+  <header class="flex items-center justify-between py-2.5 pl-5 pr-2.5">
+    <div><div class="text-lg font-bold">Quick add</div><div id="qa-count" class="text-[12.5px] text-ink-3">Enter adds the next one</div></div>
+    <button type="button" onclick="closeSheet()" class="h-11 px-4 rounded-btn bg-surface-2 font-semibold whitespace-nowrap">Done</button>
+  </header>
+
+  <!-- The locked breadcrumb: the {id} in the form action is the lock -->
+  <div class="mx-4 flex items-center gap-3 rounded-2xl bg-accent-soft py-2.5 pl-3.5 pr-2">
+    <span class="lock-glyph" aria-hidden="true"></span>
+    <div class="min-w-0 flex-1">
+      <p class="text-[10.5px] font-bold uppercase tracking-[.08em] text-accent">Adding to · locked</p>
+      <p class="truncate text-sm font-semibold">{{ path }}</p>
+    </div>
+    <button type="button" hx-get="/quick-add/pick?current={{ loc_id }}" hx-target="#qa-body"
+            class="h-10 rounded-xl bg-surface px-3 text-[13px] font-semibold text-accent whitespace-nowrap">Change</button>
+  </div>
+
+  <div id="qa-body" class="flex-1 min-h-0 overflow-auto">
+    <form id="qa-form" hx-post="/loc/{{ loc_id }}/quick-add" hx-encoding="multipart/form-data"
+          hx-target="#qa-session" hx-swap="afterbegin"
+          hx-on::after-request="if (event.detail.successful) qaReset(this)"
+          class="flex flex-col gap-3.5 px-4 pt-4 pb-2">
+      <div class="flex gap-3">
+        <label class="relative size-24 shrink-0 cursor-pointer overflow-hidden rounded-[18px] border-[1.5px] border-dashed border-line-strong bg-bg grid place-items-center">
+          <input type="file" name="photo" accept="image/*" capture="environment" class="sr-only" onchange="qaPreview(this)">
+          <span class="text-xs font-semibold text-ink-2">Photo</span>
+          <img data-preview alt="" class="absolute inset-0 size-full object-cover" hidden>
+        </label>
+        <label class="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span class="text-[12.5px] font-semibold text-ink-2">Item name</span>
+          <input name="name" required autofocus enterkeyhint="next" placeholder="e.g. Ear plugs" autocomplete="off"
+                 class="h-13 w-full rounded-btn border border-line-strong bg-surface px-3.5 text-base focus:border-accent focus:ring-3 focus:ring-accent-soft outline-none">
+        </label>
+      </div>
+
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[12.5px] font-semibold text-ink-2">Quantity</span>
+          <div class="inline-flex h-13 items-center overflow-hidden rounded-btn border border-line-strong bg-surface" data-stepper data-min="1">
+            <button type="button" class="size-13 bg-surface-2 text-2xl" aria-label="Decrease" data-step="-1">−</button>
+            <input name="qty" value="1" inputmode="numeric" class="w-14 text-center text-[19px] font-bold tabular-nums bg-transparent outline-none">
+            <button type="button" class="size-13 bg-surface-2 text-2xl" aria-label="Increase" data-step="1">+</button>
+          </div>
+        </div>
+        <label class="flex min-w-24 flex-1 flex-col gap-1.5">
+          <span class="text-[12.5px] font-semibold text-ink-2">Unit</span>
+          <input name="unit" value="pcs" class="h-13 w-full rounded-btn border border-line-strong bg-surface px-3.5 text-base outline-none focus:border-accent">
+        </label>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 rounded-btn border border-line bg-surface py-2.5 pl-3.5 pr-2.5">
+        <div class="min-w-36 flex-1"><div class="text-[12.5px] font-semibold text-ink-2">Low-stock alert</div><div class="text-[12.5px] text-ink-3" data-min-hint>Off — never flagged low</div></div>
+        <div class="inline-flex h-11 items-center rounded-xl bg-surface-2" data-stepper data-min="0">
+          <button type="button" class="size-11 text-xl" aria-label="Lower alert level" data-step="-1">−</button>
+          <input name="min_qty" value="0" inputmode="numeric" class="w-7 text-center font-bold tabular-nums bg-transparent outline-none">
+          <button type="button" class="size-11 text-xl" aria-label="Raise alert level" data-step="1">+</button>
+        </div>
+      </div>
+
+      <label class="flex flex-col gap-1.5">
+        <span class="text-[12.5px] font-semibold text-ink-2">Tags</span>
+        <input name="tags" value="{{ sticky_tags }}" placeholder="Comma separated, e.g. ppe, safety"
+               class="h-13 w-full rounded-btn border border-line-strong bg-surface px-3.5 text-base outline-none focus:border-accent">
+      </label>
+      <label class="flex min-h-11 items-center gap-2.5 text-[13.5px] text-ink-2">
+        <input type="checkbox" name="keep_tags" checked class="size-5.5 accent-accent"> Keep tags for the next item
+      </label>
+
+      <label class="flex flex-col gap-1.5">
+        <span class="text-[12.5px] font-semibold text-ink-2">Notes <span class="font-normal text-ink-3">· optional</span></span>
+        <textarea name="notes" rows="3" placeholder="e.g. Expires 03/2027, spare set for the car"
+                  class="min-h-22 w-full rounded-btn border border-line-strong bg-surface px-3.5 py-3 text-base outline-none focus:border-accent"></textarea>
+      </label>
+    </form>
+
+    <div class="px-4 pb-4 flex flex-col gap-1.5">
+      <h3 class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Added this session</h3>
+      <ul id="qa-session" class="flex flex-col gap-1.5"></ul>
+    </div>
+  </div>
+
+  <footer class="flex gap-2 border-t border-line px-4 pt-3 pb-4">
+    <button type="button" onclick="closeSheet()" class="flex-1 h-14 rounded-2xl border border-line-strong bg-surface text-base font-semibold whitespace-nowrap">Cancel</button>
+    <button type="submit" form="qa-form" class="flex-[2] h-14 rounded-2xl bg-accent text-accent-fg text-base font-bold whitespace-nowrap">Add &amp; next ↵</button>
+  </footer>
+</section>
+<script>
+  // Lives in app.js in the real build; inline here for readability.
+  function qaReset(f) {
+    const keep = f.keep_tags.checked, tags = f.tags.value;
+    f.reset(); if (keep) f.tags.value = tags; f.keep_tags.checked = keep;
+    f.querySelector('[data-preview]').hidden = true;
+    const n = document.querySelectorAll('#qa-session > li').length;
+    document.getElementById('qa-count').textContent = n + ' added';
+    f.name.focus();                                  // keyboard stays up on mobile
+  }
+  function qaPreview(input) {
+    const img = input.parentElement.querySelector('[data-preview]');
+    if (input.files[0]) { img.src = URL.createObjectURL(input.files[0]); img.hidden = false; }
+    document.querySelector('#qa-form [name=name]').focus();
+  }
+</script>
