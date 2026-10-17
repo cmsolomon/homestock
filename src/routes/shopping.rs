@@ -1,6 +1,6 @@
 use crate::{auth::CurrentUser, error::AppError, repo::locations, AppState};
 use askama::Template;
-use axum::{extract::{Form, Path, Query, State}, http::{header, HeaderValue}, response::{Html, Redirect, Response}};
+use axum::{extract::{Form, Path, Query, State}, http::{header, HeaderMap, HeaderValue}, response::{Html, IntoResponse, Redirect, Response}};
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
@@ -19,6 +19,14 @@ pub struct ShareItem { pub name:String, pub qty:i64, pub unit:String, pub locati
 #[derive(Template)]
 #[template(path = "_share_sheet.html")]
 pub struct ShareSheet { pub date:String, pub items:Vec<ShareItem> }
+
+#[derive(Template)]
+#[template(path = "_stock_row.html")]
+pub struct StockRowTemplate { pub row: StockRow, pub tab: String }
+
+#[derive(Template)]
+#[template(path = "_shopping_counts.html")]
+pub struct ShoppingCounts { pub buy_count: usize }
 
 #[derive(Template)]
 #[template(path = "shopping.html")]
@@ -84,10 +92,7 @@ pub async fn add(State(st): State<AppState>, _user: CurrentUser, Form(f): Form<A
 }
 
 pub async fn toggle(State(st): State<AppState>, _user: CurrentUser, Path(id): Path<i64>) -> Result<Redirect, AppError> {
-    st.db.call(move |c| {
-        c.execute("UPDATE shop SET bought_at=CASE WHEN bought_at IS NULL THEN unixepoch() ELSE NULL END WHERE id=?1", [id])?;
-        Ok(())
-    }).await?;
+    st.db.call(move |c| toggle_purchase(c, id)).await?;
     Ok(Redirect::to("/shopping"))
 }
 
@@ -97,6 +102,17 @@ pub async fn remove(State(st): State<AppState>, _user: CurrentUser, Path(id): Pa
         Ok(())
     }).await?;
     Ok(Redirect::to("/shopping"))
+}
+
+pub async fn remove_from_item(State(st): State<AppState>, _user: CurrentUser, headers: HeaderMap, Path(id): Path<i64>, Query(q): Query<TabQuery>) -> Result<Response, AppError> {
+    let tab = match q.tab.as_deref() { Some("used") => "used", _ => "low" };
+    let (row, buy_count) = st.db.call(move |c| remove_open_item(c, id)).await?;
+    if !crate::routes::is_htmx(&headers) {
+        return Ok(Redirect::to(&format!("/shopping?tab={tab}")).into_response());
+    }
+    let row_html = StockRowTemplate { row, tab: tab.into() }.render()?;
+    let counts = ShoppingCounts { buy_count }.render()?;
+    Ok(Html(format!("{row_html}{counts}")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -133,17 +149,58 @@ pub async fn restock(State(st): State<AppState>, _user: CurrentUser, Path(id): P
     Ok(Redirect::to("/shopping?tab=bought"))
 }
 
-pub async fn from_item(State(st): State<AppState>, _user: CurrentUser, Path(id): Path<i64>) -> Result<Redirect, AppError> {
-    st.db.call(move |c| {
-        c.execute(
-            "INSERT OR IGNORE INTO shop(name,item_id,qty)
-             SELECT name,id,CASE WHEN min_qty>0 THEN MAX(1,min_qty-available+1) ELSE 1 END
-             FROM item_status WHERE id=?1",
-            [id],
-        )?;
-        Ok(())
-    }).await?;
-    Ok(Redirect::to("/shopping"))
+pub async fn from_item(State(st): State<AppState>, _user: CurrentUser, headers: HeaderMap, Path(id): Path<i64>, Query(q): Query<TabQuery>) -> Result<Response, AppError> {
+    let tab = match q.tab.as_deref() { Some("used") => "used", _ => "low" };
+    let (row, buy_count) = st.db.call(move |c| add_item_to_list(c, id)).await?;
+    if !crate::routes::is_htmx(&headers) {
+        return Ok(Redirect::to(&format!("/shopping?tab={tab}")).into_response());
+    }
+    let row_html = StockRowTemplate { row, tab: tab.into() }.render()?;
+    let counts = ShoppingCounts { buy_count }.render()?;
+    Ok(Html(format!("{row_html}{counts}")).into_response())
+}
+
+fn add_item_to_list(c: &rusqlite::Connection, id: i64) -> Result<(StockRow, usize), AppError> {
+    c.execute(
+        "INSERT OR IGNORE INTO shop(name,item_id,qty)
+         SELECT name,id,CASE WHEN min_qty>0 THEN MAX(1,min_qty-available+1) ELSE 1 END
+         FROM item_status WHERE id=?1",
+        [id],
+    )?;
+    let row = load_stock_item(c, id)?;
+    let buy_count: usize = c.query_row("SELECT COUNT(*) FROM shop WHERE bought_at IS NULL", [], |r| r.get(0))?;
+    Ok((row, buy_count))
+}
+
+fn remove_open_item(c: &rusqlite::Connection, id: i64) -> Result<(StockRow, usize), AppError> {
+    if c.execute("DELETE FROM shop WHERE item_id=?1 AND bought_at IS NULL", [id])? == 0 {
+        return Err(AppError::conflict("This item is no longer on the shopping list"));
+    }
+    let row = load_stock_item(c, id)?;
+    let buy_count: usize = c.query_row("SELECT COUNT(*) FROM shop WHERE bought_at IS NULL", [], |r| r.get(0))?;
+    Ok((row, buy_count))
+}
+
+fn toggle_purchase(c: &rusqlite::Connection, id: i64) -> Result<(), AppError> {
+    if c.execute("UPDATE shop SET bought_at=CASE WHEN bought_at IS NULL THEN unixepoch() ELSE NULL END WHERE id=?1", [id])? == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}
+
+fn load_stock_item(c: &rusqlite::Connection, id: i64) -> Result<StockRow, AppError> {
+    let raw = c.query_row(
+        "SELECT s.id,s.name,s.qty,s.available,s.min_qty,s.unit,s.location_id,
+                EXISTS(SELECT 1 FROM shop WHERE item_id=s.id AND bought_at IS NULL)
+         FROM item_status s WHERE s.id=?1",
+        [id],
+        |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,
+            r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?,r.get::<_,bool>(7)?)),
+    ).optional()?.ok_or(AppError::NotFound)?;
+    Ok(StockRow {
+        id:raw.0,name:raw.1,qty:raw.2,available:raw.3,min_qty:raw.4,unit:raw.5,
+        location:locations::path_text(c,raw.6)?,listed:raw.7,
+    })
 }
 
 fn date_label(c:&rusqlite::Connection)->Result<String,AppError>{
@@ -194,4 +251,49 @@ pub async fn share_sheet(State(st):State<AppState>,_user:CurrentUser)->Result<Ht
         Ok((date,items))
     }).await?;
     Ok(Html(ShareSheet{date,items}.render()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn listed_low_stock_item_can_be_removed_without_changing_its_stock_status() {
+        let c = Connection::open_in_memory().expect("open in-memory database");
+        c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
+        c.execute("INSERT INTO location(name,kind) VALUES ('Kitchen','Room')", []).expect("insert room");
+        c.execute("INSERT INTO item(name,location_id,qty,min_qty) VALUES ('Coffee',1,2,3)", []).expect("insert low-stock item");
+
+        let (listed, count) = add_item_to_list(&c, 1).expect("add to list");
+        assert!(listed.listed);
+        assert_eq!(count, 1);
+
+        let (unlisted, count) = remove_open_item(&c, 1).expect("remove from list");
+        assert!(!unlisted.listed);
+        assert_eq!(count, 0);
+        assert!(c.query_row("SELECT is_low FROM item_status WHERE id=1", [], |r| r.get::<_, bool>(0)).expect("read low-stock state"));
+    }
+
+    #[test]
+    fn removing_an_item_that_is_not_listed_is_reported() {
+        let c = Connection::open_in_memory().expect("open in-memory database");
+        c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
+        c.execute("INSERT INTO location(name,kind) VALUES ('Kitchen','Room')", []).expect("insert room");
+        c.execute("INSERT INTO item(name,location_id,qty,min_qty) VALUES ('Coffee',1,2,3)", []).expect("insert low-stock item");
+
+        assert!(matches!(remove_open_item(&c, 1), Err(AppError::Conflict(_))));
+    }
+
+    #[test]
+    fn bought_item_can_be_moved_back_to_unbought() {
+        let c = Connection::open_in_memory().expect("open in-memory database");
+        c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
+        c.execute("INSERT INTO shop(name,bought_at) VALUES ('Coffee',unixepoch())", []).expect("insert bought item");
+        let id = c.last_insert_rowid();
+
+        toggle_purchase(&c, id).expect("move to unbought");
+        let bought: bool = c.query_row("SELECT bought_at IS NOT NULL FROM shop WHERE id=?1", [id], |r| r.get(0)).expect("read state");
+        assert!(!bought);
+    }
 }

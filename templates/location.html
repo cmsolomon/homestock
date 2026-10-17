@@ -24,24 +24,14 @@
               class="h-11 px-4.5 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">+ Add item</button>
       <button hx-get="/loc/{{ loc_id }}/new-box" hx-target="#sheet"
               class="h-11 px-4 rounded-btn border border-line-strong bg-surface font-medium whitespace-nowrap">Add box inside</button>
-      <button hx-get="/loc/{{ loc_id }}/move-sheet" hx-target="#sheet"
+      <button hx-get="/loc/{{ loc_id }}/move-sheet?scope={% if nested %}nested{% else %}level{% endif %}" hx-target="#sheet"
               class="h-11 px-4 rounded-btn border border-line-strong bg-surface font-medium whitespace-nowrap">Move box</button>
       <button hx-get="/loc/{{ loc_id }}/edit" hx-target="#sheet"
               class="h-11 px-4 rounded-btn border border-line-strong bg-surface font-medium whitespace-nowrap">Rename / delete</button>
     </div>
   </header>
 
-  <!-- Scope toggle: swaps #contents and keeps the URL shareable -->
-  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-    <div role="tablist" aria-label="Scope" class="inline-flex gap-0.5 p-1 rounded-full bg-surface-2">
-      <a role="tab" aria-selected="{% if nested %}false{% else %}true{% endif %}"
-         href="/loc/{{ loc_id }}" hx-get="/loc/{{ loc_id }}/contents?scope=level" hx-target="#contents" hx-push-url="/loc/{{ loc_id }}"
-         class="h-8.5 px-3.5 rounded-full text-[13px] font-semibold grid place-items-center aria-selected:bg-surface aria-selected:shadow-sm aria-[selected=false]:text-ink-2">This level</a>
-      <a role="tab" aria-selected="{% if nested %}true{% else %}false{% endif %}"
-         href="/loc/{{ loc_id }}?scope=nested" hx-get="/loc/{{ loc_id }}/contents?scope=nested" hx-target="#contents" hx-push-url="/loc/{{ loc_id }}?scope=nested"
-         class="h-8.5 px-3.5 rounded-full text-[13px] font-semibold grid place-items-center aria-selected:bg-surface aria-selected:shadow-sm aria-[selected=false]:text-ink-2">Include nested</a>
-    </div>
-  </div>
+  <div id="scope-toggle">{% include "_scope_toggle.html" %}</div>
 
   <div id="contents" data-current-loc="{{ loc_id }}">
     {% include "_contents.html" %}

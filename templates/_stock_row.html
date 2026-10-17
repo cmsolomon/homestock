@@ -1,0 +1,12 @@
+<article id="stock-item-{{ row.id }}" class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3">
+  <div class="min-w-0 flex-1"><h2 class="font-semibold">{{ row.name }}</h2><p class="text-sm text-ink-3"><span class="tabular-nums">{{ row.available }} {{ row.unit }} left</span> · {{ row.location }}</p></div>
+  {% if row.listed %}
+  <form method="post" action="/shopping/from-item/{{ row.id }}/remove?tab={{ tab }}" hx-post="/shopping/from-item/{{ row.id }}/remove?tab={{ tab }}" hx-target="closest article" hx-swap="outerHTML">
+    <button class="min-h-11 rounded-btn border border-line-strong px-4 font-semibold whitespace-nowrap">Remove from list</button>
+  </form>
+  {% else %}
+  <form method="post" action="/shopping/from-item/{{ row.id }}?tab={{ tab }}" hx-post="/shopping/from-item/{{ row.id }}?tab={{ tab }}" hx-target="closest article" hx-swap="outerHTML">
+    <button class="min-h-11 rounded-btn border border-line-strong px-4 font-semibold whitespace-nowrap">Add to list</button>
+  </form>
+  {% endif %}
+</article>

@@ -4,7 +4,7 @@
 Homestock is a lightweight, self-hosted web app for a household of 2–6 people, served on the home LAN and used on phone, tablet and desktop. Everything is organised by **physical location** (rooms → furniture → boxes → sub-boxes, unlimited depth). Every screen answers three questions: *where is it, how many are left, who has it.*
 
 Core capabilities:
-1. Hierarchical location browser with "This level / Include nested" scope.
+1. Hierarchical location browser with an on-by-default toggle for nested items, grouped by box when enabled.
 2. Mobile Quick-add that **locks** the current location so 10+ items can be added back-to-back.
 3. Partial-quantity check-out to a household member, with Return / Put away elsewhere / Reassign / Used up.
 4. Used-up and low-stock tracking feeding a Shopping list (To buy → Bought → Put away = restock).
@@ -121,10 +121,9 @@ Sidebar (top → bottom): brand row (26px accent square r9 + "Homestock" 16/700)
 ### 1. Location & container view (variant A — Sectioned)
 - **Breadcrumb:** pills 34px high, r999, padding 0 10, 13px. Current = surface-2 bg, 700 weight. Separators `›` text-3. Scrolls horizontally on mobile. Every segment (including "All locations") is a drop target.
 - **Header:** kind label (11/600 uppercase, .08em, text-3), title 26/700/-0.02em, meta 13 text-2 (e.g. "3 boxes · 9 items in total"; at root: "4 rooms · 14 places · 15 items"). Actions on the right (they wrap onto their own line on mobile): **+ Add item** (primary, 44px, r14, padding 0 18), **Add box inside** / at root "Add room" (secondary), **Move box** (secondary, hidden at root). All buttons are nowrap.
-- **Scope toggle:** segmented pill track (surface-2, padding 4, r999) with two 34px segments "This level" / "Include nested". Active segment = surface bg + `0 1px 2px rgba(0,0,0,.08)`. Right side: "N items at this level" / "N items including nested boxes" (12.5 text-3).
 - **Boxes inside · N:** grid `minmax(min(100%,220px),1fr)`, gap 10. Card: padding 10 12 10 10, r16, 1px border, 52px thumb r12 (striped placeholder or photo), name 14/600 ellipsis, meta 12 text-3 ("4 items · 1 box" / "Empty"), trailing `›`. Hover: border-strong + shadow.
-- **Hint:** if a level has child boxes but no direct items in flat mode, show the link "No loose items here. Show all N items in nested boxes →" (accent 13.5/600). It switches to nested.
-- **Items · N:** item card = r18, 1px border, overflow hidden. Photo area 4:3 with striped placeholder; qty pill top-left (12.5/700 tabular, padding 4 10, surface bg). Body padding 10 12 12, gap 6: name 14/600; in nested mode a relative path "in Cupboard › Storage Box 12" (11.5 text-3, ellipsis); badges row (status badges first, then max 2 tags). Used-up cards render at opacity .7 and sort last.
+- **Show nested items:** an on-by-default on/off switch on both All locations and individual location pages. On All locations, room items are always shown and enabling the switch also includes all nested boxes. On a location page, enabling it includes all boxes inside that location. Items are grouped by their storage location; group headings show the box path and link to that location.
+- **Item card:** r18, 1px border, overflow hidden. Photo area 4:3 with striped placeholder; qty pill top-left (12.5/700 tabular, padding 4 10, surface bg). Body padding 10 12 12, gap 6: name 14/600; badges row (status badges first, then max 2 tags). Used-up cards render at opacity .7 and sort last.
 - **Empty box:** dashed 1.5px border-strong, r22, padding 44 24, centred. Headline "{name} is empty" (17/700), body "Add things one after another with Quick add, create a box inside it, or drag a box here from the sidebar.", buttons "Quick add items" (primary) and "Add a box inside". The whole block is a drop target.
 
 ### 2. Item detail
@@ -166,9 +165,9 @@ Stepper "How many were used?" + "leaves 5 pcs in Bin 4 · Batteries" (no stepper
 ### 8. Shopping list
 - Header: title + meta "2 to buy · tick when bought, then put away to restock", and **Share list** (primary 44px, share glyph; disabled when nothing is in To buy).
 - Tabs (segmented, 36px, horizontal scroll, no scrollbar): **To buy · N**, **Bought · N**, **Low stock · N**, **Used up · N**.
-- To buy: an add row (48px input "Add something to buy" + Add). Rows min-height 60, r18: 48px checkbox hit area around a 24px box (r8; ticked = accent fill + ✓), name 14.5/600, sub "Restocks Garage › Shelf A › Bin 4" or "Not linked to an item", pill **"Buy 2 pcs"** (nowrap), **Not buying** button. Not buying removes the entry; the item stays in Used up / Low stock. Toast: "{name} removed — still under Used up".
-- Bought: name struck through in text-2, then **Put away in {box}** (primary; restocks) or **Put away…** for unlinked entries (opens the location picker). The checkbox un-ticks the entry.
-- Low stock: items where `low` is true. Row: name + "Low stock" badge, "6 pcs left · alert at 8 · Bin 4 · Batteries", **Add to list** or the "On the list" label (ok colour), **Open**. An "Add all N to list" button appears above when 2 or more items are not yet on the list.
+- To buy: an add row (48px input "Add something to buy" + Add). Rows min-height 60, r18: 48px checkbox hit area around a 24px box (r8; ticked = accent fill + ✓), name 14.5/600, sub "Restocks Garage › Shelf A › Bin 4" or "Not linked to an item", pill **"Buy 2 pcs"** (nowrap), **Remove** button. Removing a linked entry leaves its item in Used up / Low stock.
+- Bought: name struck through in text-2, then **Put away in {box}** (primary; restocks) or **Put away…** for unlinked entries (opens the location picker). **Move back to To buy** unticks the entry; **Remove** deletes it without restocking.
+- Low stock: items where `low` is true. Row: name + "Low stock" badge, "6 pcs left · alert at 8 · Bin 4 · Batteries", **Add to list** or **Remove from list**. Removing a listing leaves the item in Low stock; both actions update the row and list count immediately.
 - Used up: same row with the "Used up" badge and full path.
 - Empty states (dashed box): To buy "Nothing to buy. Mark an item “Used up” and tick “Add to shopping list” to fill this."; Bought "Ticked items wait here until you put them away."; Low "Nothing is at or below its alert level. Set an alert level on an item to track it here."; Used "No used-up items."
 

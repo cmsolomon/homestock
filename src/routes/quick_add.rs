@@ -11,7 +11,7 @@ pub struct Sheet { pub loc_id: i64, pub loc_name: String, pub path: String, pub 
 
 #[derive(Deserialize, Default)]
 pub struct QuickAddQuery { pub scope: Option<String> }
-impl QuickAddQuery { fn nested(&self) -> bool { self.scope.as_deref() == Some("nested") } }
+impl QuickAddQuery { fn nested(&self) -> bool { self.scope.as_deref() != Some("level") } }
 
 #[derive(Template)]
 #[template(path = "_qa_row.html")]
@@ -35,7 +35,7 @@ pub async fn last(State(st): State<AppState>, u: CurrentUser) -> Result<Response
 
 /// POST /loc/{id}/quick-add (multipart). Returns one `<li>` for the session list
 /// (`hx-swap="afterbegin"` on #qa-session) plus an OOB count update.
-pub async fn create(State(st): State<AppState>, u: CurrentUser, Path(loc_id): Path<i64>, Query(q): Query<QuickAddQuery>, mut mp: Multipart) -> Result<Html<String>, AppError> {
+pub async fn create(State(st): State<AppState>, u: CurrentUser, Path(loc_id): Path<i64>, Query(_q): Query<QuickAddQuery>, mut mp: Multipart) -> Result<Html<String>, AppError> {
     let (mut name, mut qty, mut unit, mut min_qty, mut tags, mut notes, mut photo_bytes) =
         (String::new(), 1i64, "pcs".to_string(), 0i64, Vec::<String>::new(), String::new(), None::<Vec<u8>>);
     while let Some(field) = mp.next_field().await.map_err(|e| AppError::bad(e.to_string()))? {
@@ -70,6 +70,6 @@ pub async fn create(State(st): State<AppState>, u: CurrentUser, Path(loc_id): Pa
         }).await?
     };
     let mut response = QaRow { id, name: name_ret, qty_label, photo: photo_ret }.render()?;
-    response.push_str(&location_routes::contents_oob(&st, loc_id, q.nested()).await?);
+    response.push_str(&location_routes::contents_oob(&st, loc_id, _q.nested()).await?);
     Ok(Html(response))
 }

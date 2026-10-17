@@ -20,21 +20,22 @@
   </section>
 {% endif %}
 
-{% if let Some(h) = flat_hint %}
-  <button hx-get="/loc/{{ loc_id }}/contents?scope=nested" hx-target="#contents" hx-push-url="/loc/{{ loc_id }}?scope=nested"
-          class="self-start text-accent text-[13.5px] font-semibold">{{ h }}</button>
-{% endif %}
-
-{% if !items.is_empty() %}
+{% for group in item_groups %}
   <section class="flex flex-col gap-2.5">
-    <h2 class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">{% if nested %}Items in this location and nested boxes{% else %}Items{% endif %} · {{ items.len() }}</h2>
+    <h2 class="text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">
+      {% if nested %}
+      Items in <a href="/loc/{{ group.location_id }}" class="text-accent hover:underline">{{ group.label }}</a> · {{ group.items.len() }}
+      {% else %}
+      Items · {{ group.items.len() }}
+      {% endif %}
+    </h2>
     <div class="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,156px),1fr))]">
-      {% for it in items %}{% include "_item_card.html" %}{% endfor %}
+      {% for it in group.items %}{% include "_item_card.html" %}{% endfor %}
     </div>
   </section>
-{% endif %}
+{% endfor %}
 
-{% if boxes.is_empty() && items.is_empty() %}
+{% if boxes.is_empty() && item_groups.is_empty() %}
   <div data-drop-loc="{{ loc_id }}" class="rounded-[22px] border-[1.5px] border-dashed border-line-strong px-6 py-11 flex flex-col items-center text-center gap-2.5">
     <span class="w-12 h-10 rounded-xl border-2 border-t-8 border-line-strong"></span>
     <div class="font-bold text-[17px]">{{ title }} is empty</div>

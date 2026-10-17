@@ -7,7 +7,6 @@
   </div>
   <div class="flex flex-1 flex-col gap-1.5 px-3 pb-3 pt-2.5">
     <h3 class="font-semibold leading-snug">{{ it.name }}</h3>
-    {% if let Some(rp) = it.rel_path %}<p class="truncate text-[11.5px] text-ink-3">in {{ rp }}</p>{% endif %}
     <div class="mt-auto flex flex-wrap gap-1">
       {% if it.in_use > 0 %}<span class="rounded-full bg-use-soft text-use px-2 py-0.5 text-[11px] font-semibold">{{ it.in_use }} in use</span>{% endif %}
       {% if it.is_low %}<span class="rounded-full bg-low-soft text-low px-2 py-0.5 text-[11px] font-semibold">Low stock</span>{% endif %}
