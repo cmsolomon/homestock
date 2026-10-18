@@ -25,7 +25,7 @@
   </section>
   {% if user.is_admin %}
   <section class="rounded-card border border-line bg-surface p-4"><h2 class="font-bold">Add a household member</h2>
-    <form method="post" action="/users" class="mt-3 flex flex-wrap gap-2">
+    <form method="post" action="/users" hx-post="/users" hx-target="#sheet" class="mt-3 flex flex-wrap gap-2">
       <input name="name" required maxlength="60" placeholder="Name" class="h-12 min-w-40 flex-1 rounded-btn border border-line-strong bg-bg px-3 text-base">
       <select name="role" class="h-12 rounded-btn border border-line-strong bg-bg px-3 text-base"><option value="member">Member</option><option value="admin">Admin</option></select>
       <button class="h-12 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Add user</button>

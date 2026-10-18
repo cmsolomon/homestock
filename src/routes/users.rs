@@ -34,12 +34,16 @@ fn temp_password() -> String {
 }
 
 #[derive(Template)]
-#[template(path = "temp_password.html")]
-pub struct TempPasswordPage { pub name:String, pub password:String, pub action:String }
-
-#[derive(Template)]
 #[template(path = "_reset_password_result.html")]
 pub struct ResetPasswordResult { pub name:String, pub password:String }
+
+#[derive(Template)]
+#[template(path = "_duplicate_user_dialog.html")]
+pub struct DuplicateUserDialog;
+
+#[derive(Template)]
+#[template(path = "_new_user_password.html")]
+pub struct NewUserPassword { pub name:String, pub password:String }
 
 #[derive(Deserialize)]
 pub struct AddForm { name:String, role:String }
@@ -52,12 +56,12 @@ pub async fn create(State(st):State<AppState>, _admin:AdminUser, Form(f):Form<Ad
     let password_hash=password.clone();
     let password_hash=tokio::task::spawn_blocking(move||auth::hash(&password_hash)).await.map_err(|e|AppError::internal(e.to_string()))??;
     let saved_name=name.clone();
-    st.db.call(move|c|{
-        ensure_name_available(c, &saved_name)?;
-        c.execute("INSERT INTO user(name,role,password_hash,must_change_pw) VALUES (?1,?2,?3,1)",params![saved_name,f.role,password_hash])?;
-        Ok(())
-    }).await?;
-    Ok(Html(TempPasswordPage{name,password,action:"Share this temporary password with the new member.".into()}.render()?))
+    let created=st.db.call(move|c|insert_user(c,&saved_name,&f.role,&password_hash)).await?;
+    if created {
+        Ok(Html(NewUserPassword{name,password}.render()?))
+    } else {
+        Ok(Html(DuplicateUserDialog.render()?))
+    }
 }
 
 pub async fn reset(State(st):State<AppState>,admin:AdminUser,Path(id):Path<i64>)->Result<Html<String>,AppError>{
@@ -155,6 +159,21 @@ pub(crate) fn ensure_name_available(c:&rusqlite::Connection,name:&str)->Result<(
     Ok(())
 }
 
+fn insert_user(c:&mut rusqlite::Connection,name:&str,role:&str,password_hash:&str)->Result<bool,AppError>{
+    let tx=c.transaction()?;
+    match ensure_name_available(&tx,name) {
+        Ok(()) => {}
+        Err(AppError::Conflict(_)) => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    tx.execute(
+        "INSERT INTO user(name,role,password_hash,must_change_pw) VALUES (?1,?2,?3,1)",
+        params![name,role,password_hash],
+    )?;
+    tx.commit()?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +207,14 @@ mod tests {
         remove_user(&mut c,2).expect("remove member");
         assert!(matches!(ensure_name_available(&c,"SAM"),Err(AppError::Conflict(_))));
         ensure_name_available(&c,"Taylor").expect("unused name is available");
+    }
+
+    #[test]
+    fn adding_user_with_duplicate_name_returns_duplicate_result_without_inserting(){
+        let mut c=database();
+        assert!(!insert_user(&mut c,"aLeX","member","unused-hash").expect("check duplicate"));
+        let count:i64=c.query_row("SELECT COUNT(*) FROM user",[],|r|r.get(0)).expect("count users");
+        assert_eq!(count,1);
     }
 
     #[test]

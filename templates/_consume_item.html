@@ -1,0 +1,19 @@
+<div class="fixed inset-0 z-40 grid items-end bg-scrim sm:place-items-center" onclick="if(event.target===this) closeSheet()">
+  <section role="dialog" aria-modal="true" aria-labelledby="consume-item-title" class="w-full rounded-t-[24px] bg-surface p-5 sm:max-w-[480px] sm:rounded-[24px]">
+    <div class="mx-auto mb-4 h-[5px] w-10 rounded-full bg-line-strong sm:hidden"></div>
+    <h2 id="consume-item-title" class="text-lg font-bold">Consume item</h2>
+    <p class="mt-1 font-semibold">{{ name }}</p>
+    <p class="mt-2 text-sm text-ink-2">Confirm how many units to remove from inventory. This cannot be undone.</p>
+    <form method="post" action="/items/{{ id }}/consume" class="mt-4 flex flex-col gap-3">
+      <label class="flex flex-col gap-1.5 font-medium">Quantity to consume
+        <input name="qty" type="number" min="1" max="{{ available }}" value="1" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums">
+      </label>
+      <p class="text-sm text-ink-3 tabular-nums">Up to {{ available }} {{ unit }} available</p>
+      <label class="flex min-h-11 items-center gap-2.5"><input type="checkbox" name="add_to_list" value="yes" class="size-5 accent-accent"> Add to shopping list</label>
+      <div class="flex gap-2">
+        <button class="h-12 flex-1 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Confirm consume</button>
+        <button type="button" onclick="closeSheet()" class="h-12 rounded-btn border border-line-strong px-4 font-medium whitespace-nowrap">Cancel</button>
+      </div>
+    </form>
+  </section>
+</div>

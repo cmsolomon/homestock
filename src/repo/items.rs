@@ -231,4 +231,16 @@ mod tests {
         };
         assert_eq!(rows, vec![(1,6),(2,2)]);
     }
+
+    #[test]
+    fn consuming_units_decreases_inventory_quantity() {
+        let mut c = database();
+        consume(&mut c, 1, 3, None, false).expect("consume units");
+        let (qty, available): (i64, i64) = c.query_row(
+            "SELECT qty,available FROM item_status WHERE id=1",
+            [],
+            |r| Ok((r.get(0)?,r.get(1)?)),
+        ).expect("read updated quantity");
+        assert_eq!((qty, available), (5, 5));
+    }
 }

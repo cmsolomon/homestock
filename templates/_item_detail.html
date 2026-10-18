@@ -23,7 +23,11 @@
           <select name="user_id" class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base">{% for person in people %}<option value="{{ person.id }}">{{ person.name }}</option>{% endfor %}</select>
         </label>
       </div>
-      <button class="h-12 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Check out</button>
+      <div class="flex gap-2">
+        <button class="h-12 flex-1 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Check out</button>
+        <button type="button" hx-get="/items/{{ id }}/consume" hx-target="#sheet"
+                class="h-12 flex-1 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Consume</button>
+      </div>
     </form>
     {% endif %}
     {% if available > 0 %}<form method="post" action="/items/{{ id }}/move" class="mt-5 border-t border-line pt-4 flex flex-col gap-3">
@@ -34,14 +38,6 @@
       <label class="flex flex-col gap-1.5 font-medium">Quantity to move <span class="text-sm font-normal text-ink-3">Up to {{ available }} available</span><input name="qty" type="number" min="1" max="{{ available }}" value="{{ available }}" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
       <button class="h-12 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Move item</button>
     </form>{% endif %}
-    {% if available > 0 %}
-    <form method="post" action="/items/{{ id }}/consume" class="mt-5 border-t border-line pt-4 flex flex-col gap-3">
-      <h3 class="font-bold">Mark used</h3>
-      <label class="flex flex-col gap-1.5 font-medium">Quantity<input name="qty" type="number" min="1" max="{{ available }}" value="1" required class="h-[48px] rounded-btn border border-line-strong bg-bg px-3 text-base tabular-nums"></label>
-      <label class="flex min-h-11 items-center gap-2.5"><input type="checkbox" name="add_to_list" value="yes" class="size-5 accent-accent"> Add to shopping list</label>
-      <button class="h-12 rounded-btn border border-line-strong font-semibold whitespace-nowrap">Mark used</button>
-    </form>
-    {% endif %}
     <form method="post" action="/items/{{ id }}/delete" onsubmit="return confirm('Delete this item?')">
       <button class="mt-5 h-12 w-full rounded-btn border border-gone text-gone font-semibold whitespace-nowrap">Delete item</button>
     </form>

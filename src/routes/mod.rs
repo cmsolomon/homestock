@@ -36,7 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/delete", post(items::delete))
         .route("/items/{id}/checkout", post(items::checkout))
         .route("/items/{id}/move", post(items::move_item))
-        .route("/items/{id}/consume", post(items::consume))
+        .route("/items/{id}/consume", get(items::consume_dialog).post(items::consume))
         .route("/in-use", get(items::in_use))
         .route("/search", get(search::index))
         .route("/shopping", get(shopping::index).post(shopping::add))

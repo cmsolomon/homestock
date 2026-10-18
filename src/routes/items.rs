@@ -21,6 +21,15 @@ pub struct Detail {
     pub destinations: Vec<Destination>,
 }
 
+#[derive(Template)]
+#[template(path = "_consume_item.html")]
+pub struct ConsumeItem {
+    pub id: i64,
+    pub name: String,
+    pub unit: String,
+    pub available: i64,
+}
+
 pub struct Person { pub id: i64, pub name: String }
 pub struct Destination { pub id: i64, pub name: String }
 
@@ -99,6 +108,29 @@ pub async fn checkout(State(st): State<AppState>, _user: CurrentUser, Path(id): 
     if f.qty < 1 { return Err(AppError::bad("Choose at least one item")); }
     st.db.call(move |c| items::checkout(c, id, f.qty, f.user_id)).await?;
     Ok(Redirect::to("/in-use"))
+}
+
+pub async fn consume_dialog(
+    State(st): State<AppState>,
+    _user: CurrentUser,
+    Path(id): Path<i64>,
+) -> Result<Html<String>, AppError> {
+    let item = st.db.call(move |c| {
+        c.query_row(
+            "SELECT name,unit,available FROM item_status WHERE id=?1",
+            [id],
+            |r| Ok(ConsumeItem {
+                id,
+                name: r.get(0)?,
+                unit: r.get(1)?,
+                available: r.get(2)?,
+            }),
+        ).optional()?.ok_or(AppError::NotFound)
+    }).await?;
+    if item.available < 1 {
+        return Err(AppError::conflict("There are no available units to consume"));
+    }
+    Ok(Html(item.render()?))
 }
 
 #[derive(Deserialize)]
