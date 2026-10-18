@@ -3,8 +3,8 @@
 Self-hosted home inventory for a 2–6 person household, served over HTTPS on the LAN. The full spec is in `design_handoff_homestock/README.md`. The HTML files in `design/` are visual and behavioural references; do not ship them.
 
 ## Stack (decided)
-Rust stable · axum 0.8 + tokio (current_thread) · rusqlite (bundled, backup) with SQLite WAL · askama templates · HTMX (vendored) + small vanilla JS · Tailwind v4 via standalone CLI · argon2 sessions · single binary in a Proxmox LXC behind Caddy (tls internal).
-Architecture, routes and backups: `design_handoff_homestock/IMPLEMENTATION.md`. Schema: `starter/migrations/0001_init.sql`. Extend the code in `starter/`; don't restructure it.
+Rust stable · axum 0.8 + tokio (current_thread) · rusqlite (bundled, backup) with SQLite WAL · askama templates · HTMX (vendored) + small vanilla JS · Tailwind v4 via standalone CLI · argon2 sessions · Docker image in a Proxmox LXC behind Caddy (tls internal).
+Architecture, routes, backups and Docker deployment: `design_handoff_homestock/IMPLEMENTATION.md`. The active Rust application is in `src/`; `design_handoff_homestock/starter/` is reference material.
 
 ## Offline
 The app must work with no internet connection. Never add CDN links, web fonts, remote scripts or external API calls. Tailwind runs only at build time (standalone CLI → `static/app.css`). HTMX is vendored in `static/`.

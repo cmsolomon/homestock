@@ -17,7 +17,7 @@ Core capabilities:
 ## About the design files
 The files in `design/` are **design references built in HTML** — a working prototype that shows the intended look and behaviour. They are **not production code to copy**. Recreate them in the target stack using its normal patterns. If no codebase exists yet, a good fit is:
 
-- **Decided stack (owner):** Rust · Axum + Tokio · SQLite (WAL) · server-rendered Askama templates + **HTMX** · Tailwind v4 (build-time CLI) · **fully offline: no CDN or external requests at runtime** · runs as a single binary in a Proxmox LXC, with idle-time backups to a CIFS-mounted NAS.
+- **Decided stack (owner):** Rust · Axum + Tokio · SQLite (WAL) · server-rendered Askama templates + **HTMX** · Tailwind v4 (build-time CLI) · **fully offline: no CDN or external requests at runtime** · packaged as a Docker image for a Proxmox LXC, with persistent database storage and idle-time backups to a configured directory.
 - **See `IMPLEMENTATION.md`** for architecture, directory layout, routes, backup design and deployment, and `starter/` for the schema SQL and reference Rust/HTMX code (not compiled — a starting shape).
 - “Optimistic UI” below means: HTMX swaps the server's fragment immediately. There is no client-side store.
 

@@ -1,10 +1,11 @@
 bind = "127.0.0.1:8080"
 data_dir = "/tmp/homestock-local-data"
+database_path = "/tmp/homestock-local-data/homestock.sqlite3"
 session_days = 30
 cookie_secure = false
 
 [backup]
-nas_dir = "/tmp/homestock-local-nas"
+directory = "/tmp/homestock-local-nas"
 sentinel = ".homestock-nas"
 idle_secs = 300
 min_interval_secs = 1800

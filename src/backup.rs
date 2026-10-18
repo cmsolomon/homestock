@@ -3,7 +3,7 @@
 //! - Dirty detection: `PRAGMA data_version` on our own long-lived connection changes
 //!   whenever the app's connection commits. No bookkeeping in handlers.
 //! - Idle detection: `Activity` (updated by middleware on every request).
-//! - Safety: only runs if `<nas_dir>/<sentinel>` exists, so an unmounted share
+//! - Safety: only runs if `<backup directory>/<sentinel>` exists, so an unmounted share
 //!   (an empty local mount point) never fills the container disk.
 use crate::{activity::Activity, config::BackupConfig, db::open_conn};
 use rusqlite::{backup::Backup, Connection};
@@ -31,7 +31,7 @@ impl Backupper {
         Ok(self.last_version != Some(v))
     }
 
-    fn nas_ready(&self) -> bool { Path::new(&self.cfg.nas_dir).join(&self.cfg.sentinel).exists() }
+    fn nas_ready(&self) -> bool { Path::new(&self.cfg.directory).join(&self.cfg.sentinel).exists() }
 
     /// Decide and (maybe) run. Called every 60 s on the blocking pool, and once at shutdown with `force`.
     pub fn tick(&mut self, activity: &Activity, force: bool) {
@@ -44,7 +44,7 @@ impl Backupper {
             || (idle && since >= self.cfg.min_interval_secs)
             || since >= self.cfg.max_interval_secs;
         if !due { return; }
-        if !self.nas_ready() { tracing::warn!("backup: NAS sentinel missing at {}, skipping", self.cfg.nas_dir); return; }
+        if !self.nas_ready() { tracing::warn!("backup: sentinel missing at {}, skipping", self.cfg.directory); return; }
 
         match self.run() {
             Ok(name) => {
@@ -61,7 +61,7 @@ impl Backupper {
 
     fn run(&self) -> Result<String, Box<dyn std::error::Error>> {
         let name = format!("homestock-{}.sqlite3", now());
-        let nas = PathBuf::from(&self.cfg.nas_dir);
+        let nas = PathBuf::from(&self.cfg.directory);
         let staging = if self.cfg.stage_locally { self.data_dir.join("staging") } else { nas.clone() };
         fs::create_dir_all(&staging)?;
         let tmp = staging.join(format!("{name}.part"));
@@ -93,7 +93,7 @@ impl Backupper {
     }
 
     fn prune(&self) -> std::io::Result<()> {
-        let mut files: Vec<_> = fs::read_dir(&self.cfg.nas_dir)?
+        let mut files: Vec<_> = fs::read_dir(&self.cfg.directory)?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("homestock-") && n.ends_with(".sqlite3")))
@@ -107,7 +107,7 @@ impl Backupper {
     /// Photos are content-addressed and immutable: copy whatever the NAS lacks.
     fn sync_photos(&self) -> std::io::Result<()> {
         let src = self.data_dir.join("photos");
-        let dst = Path::new(&self.cfg.nas_dir).join("photos");
+        let dst = Path::new(&self.cfg.directory).join("photos");
         if !src.exists() { return Ok(()); }
         fs::create_dir_all(&dst)?;
         for e in fs::read_dir(&src)? {

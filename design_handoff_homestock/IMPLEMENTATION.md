@@ -20,8 +20,8 @@ Runnable-shaped starter code is in `starter/`. It has not been compiled. It show
 | Search | SQLite **FTS5 `trigram`** table → candidate set → Rust re-rank with `strsim` | Handles typos like “batery”. See §5. |
 | Images | `image` crate (jpeg/png/webp/heic-less) → resize to 1600 px, re-encode JPEG q82 | Re-encoding also strips EXIF/GPS. Files are content-addressed: `photos/<sha256>.jpg`. |
 | CSV | `csv` crate | |
-| Config | `config.toml` (serde + `toml`) | Seeds initial users and sets backup policy. |
-| Backup | SQLite online backup API, triggered when the app is idle, copied to the CIFS-mounted NAS | See §6. |
+| Config | `config.toml` (serde + `toml`) | Configures the database path, data directory, backup destination, and backup policy. |
+| Backup | SQLite online backup API, triggered when the app is idle, copied to a configured backup directory | See §6. |
 
 Expected footprint: a single ~8–12 MB static binary, about 10–20 MB RSS when idle, effectively 0% CPU when idle. The only wakeup is a 60 s backup tick.
 
@@ -30,6 +30,9 @@ Expected footprint: a single ~8–12 MB static binary, about 10–20 MB RSS when
 ```
 homestock/
 ├── Cargo.toml
+├── Dockerfile                  # offline runtime image
+├── release.sh                  # builds a portable Docker release archive
+├── deploy/                     # Compose, config template, install/upgrade scripts
 ├── build.rs                    # optional: run tailwind CLI if present
 ├── config.example.toml
 ├── migrations/
@@ -115,11 +118,12 @@ The full SQL is in `starter/migrations/0001_init.sql`. Decisions:
 - `activity.rs` middleware stores the timestamp of the last request in an `AtomicU64`.
 - The backup task keeps its **own read connection** and polls `PRAGMA data_version`. That value changes whenever *another* connection commits, so it is a free “dirty” flag with no app bookkeeping.
 - Every 60 s a backup runs when **dirty AND idle ≥ `idle_secs` (default 300) AND since-last ≥ `min_interval_secs` (1800)**. It also runs when **dirty AND since-last ≥ `max_interval_secs` (86400)**, even if the app is busy, and once on graceful shutdown.
-- **NAS safety:** the backup only runs if `<nas_dir>/<sentinel>` exists. If the CIFS share is not mounted, the mount point is an empty local folder, and writing there would silently fill the container disk.
-- **Procedure:** `Backup::new(src, dst).run_to_completion(256 pages, 20 ms pause)` into a **local staging file**, then `PRAGMA quick_check`, then copy to `<nas>/homestock-<unix>.sqlite3.part`, fsync, and rename to the final name. Prune to the newest `keep` files.
+- **Schema version:** SQLite's `PRAGMA user_version` is the schema version, currently `2`. Each migration sets it to its new version. On startup, if an existing database is behind the application schema, the app creates and integrity-checks an SQLite online backup next to the database (named `*.pre-migration-v<old>-to-v<new>-<timestamp>.sqlite3`) before applying any migration. If the backup cannot be completed and verified, startup stops before migration. New databases are initialized without a pre-migration backup.
+- **NAS safety:** the backup only runs if `<backup.directory>/<sentinel>` exists. If the CIFS share is not mounted, the mount point is an empty local folder, and writing there would silently fill the container disk.
+- **Procedure:** `Backup::new(src, dst).run_to_completion(256 pages, 20 ms pause)` into a **local staging file**, then `PRAGMA quick_check`, then copy to `<backup.directory>/homestock-<unix>.sqlite3.part`, fsync, and rename to the final name. Prune to the newest `keep` files.
   - *Adjustment to the owner's note (“straight to the NAS”):* SQLite's own file locking over CIFS is unreliable, especially with `nobrl`/caching options. Staging locally and copying a finished file keeps the NAS write a plain sequential copy. Set `stage_locally = false` to write directly if the share is known-good.
-- **Photos:** they are content-addressed and immutable, so the same tick copies any `photos/*.jpg` missing on the NAS (`<nas>/photos/`). No diffing is needed.
-- Restore: stop the service, copy a backup to `data_dir/homestock.sqlite3`, delete `-wal`/`-shm`, start.
+- **Photos:** they are content-addressed and immutable, so the same tick copies any `photos/*.jpg` missing on the backup destination (`<backup.directory>/photos/`). No diffing is needed.
+- Restore: stop the service, copy a backup to the configured `database_path`, delete its `-wal`/`-shm` sidecars, start.
 
 ## 7. Routes (server-rendered + HTMX partials)
 
@@ -173,21 +177,14 @@ HTMX conventions:
 - **Drag & drop** (`static/app.js`, ≥ 640 px only): native HTML5 DnD on `[data-drag-loc]` / `[data-drag-item]`. Drop targets are `[data-drop-loc]` (cards, breadcrumb, sidebar). Drop → `htmx.ajax('POST', …/move, {values, target:'#contents'})`. The server re-renders contents and returns the toast via OOB.
 - **Share list:** `fetch('/shopping/share.txt')` → `navigator.share({title, text})`. On a non-abort failure, open the fallback sheet (Email `mailto:` + Copy text).
 
-## 9. Deployment on Proxmox LXC
+## 9. Docker deployment in a Proxmox LXC
 
-- **CIFS in an unprivileged LXC:** unprivileged containers cannot mount CIFS themselves. Mount the share on the **Proxmox host** and bind it in:
-  ```
-  # host /etc/fstab
-  //nas/backups/homestock /mnt/nas-homestock cifs credentials=/root/.smb-homestock,vers=3.1.1,uid=101000,gid=101000,file_mode=0640,dir_mode=0750,_netdev,nofail,x-systemd.automount 0 0
-  # host
-  pct set <CTID> -mp0 /mnt/nas-homestock,mp=/mnt/nas
-  touch /mnt/nas-homestock/.homestock-nas      # sentinel
-  ```
-  (uid 101000 = container uid 1000 under the default unprivileged mapping. Match it to the `homestock` service user.)
-- **systemd unit** (inside the container): `User=homestock`, `WorkingDirectory=/var/lib/homestock`, `ExecStart=/usr/local/bin/homestock --config /etc/homestock/config.toml`, `Restart=on-failure`, `MemoryMax=128M`, `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ReadWritePaths=/var/lib/homestock /mnt/nas`. Send `SIGTERM` for a graceful shutdown, which runs a final backup.
-- **HTTPS on the LAN:** put Caddy (`tls internal`) or the existing reverse proxy in front. A secure context is required for `navigator.share` on phones. Install Caddy's root CA on household devices once.
-- **Offline:** the app makes **no external requests at runtime** and must work with the internet down. Tailwind is a build-time tool: the standalone CLI (single binary, no Node) turns `styles/input.css` + the class names in `templates/` into one small `static/app.css`. HTMX is vendored as `static/htmx.min.js`. There are no web fonts (system font stack), no CDNs and no analytics. Optionally embed `static/` in the binary (`rust-embed` or `include_bytes!`) for a single-file deploy.
-- **Release profile:** `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`, `opt-level = 3`.
+- **Build an offline release bundle** on a machine with Docker for the target architecture: `./release.sh 0.2.0`. It builds the multi-stage `Dockerfile`, saves the image, and creates `dist/homestock-0.2.0.tar.gz` with the image, Compose file, example config, deployment guide, and install/upgrade scripts. Transfer and extract the archive inside the LXC. The app image itself makes no external requests at runtime.
+- **First install:** review `config.toml` and `.env`, then run `./install.sh`. The config has explicit `database_path` and `[backup].directory` paths inside the container. Compose bind-mounts `/var/lib/homestock` to the persistent data directory (SQLite database, photos, staging) and `/var/backups/homestock` to the backup destination. Keep the database path under `/var/lib/homestock`, or update the Compose data mount as well. The initial admin is created through the setup page.
+- **Access and HTTPS:** Compose publishes only `127.0.0.1:8080`; configure Caddy or another reverse proxy in the LXC to forward to it. Use HTTPS (`tls internal` for Caddy on a LAN) because production config enables Secure cookies and `navigator.share` needs a secure context.
+- **Backup destination:** set `HOMESTOCK_BACKUP_DIR` in `.env` to the mounted host path, or leave it at `./backups`. Backup files and photos are only written when the configured `.homestock-nas` sentinel exists in that directory. For a CIFS share, mount it on the Proxmox host and bind it into the LXC before pointing Compose at it; create the sentinel on the mounted share, not on an unmounted mount-point directory. Make the destination writable by the UID/GID in `.env` (defaults to `10001:10001`).
+- **Upgrade:** unpack the new release over the existing deployment directory and run `./upgrade.sh`. The script verifies the configured data directory and database file exist before it replaces the container. The release archive does not contain `config.toml`, `.env`, or the data directories. It never runs `docker compose down -v`; do not change the data-directory mapping or `database_path` during an upgrade unless intentionally migrating the database. Before applying schema changes, startup writes a verified SQLite backup beside the database. Keep independent backups before upgrades as well.
+- **Permissions:** the container runs as UID/GID 10001 by default. Update the two IDs in `.env` to match the owner of the data and backup directories; for a fresh local deployment run `chown 10001:10001 data backups` if the directories were created by root. The CIFS mount must also grant that identity write access.
 - **SQLite pragmas** (set on every connection): `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout=5000`, `temp_store=MEMORY`, `cache_size=-4000` (≈4 MB). Run `PRAGMA optimize` after each backup.
 
 ## 10. Build order for Copilot

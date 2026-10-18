@@ -1,0 +1,21 @@
+services:
+  homestock:
+    image: homestock:release
+    container_name: homestock
+    restart: unless-stopped
+    init: true
+    user: "${HOMESTOCK_UID:-10001}:${HOMESTOCK_GID:-10001}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - "${HOMESTOCK_DATA_DIR:-./data}:/var/lib/homestock"
+      - "${HOMESTOCK_BACKUP_DIR:-./backups}:/var/backups/homestock"
+      - "./config.toml:/etc/homestock/config.toml:ro"
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 45s

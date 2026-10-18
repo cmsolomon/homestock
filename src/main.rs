@@ -16,7 +16,10 @@ async fn main() -> anyhow_free::Result {
 
     let cfg = Arc::new(config::Config::load_from_args()?);
     std::fs::create_dir_all(cfg.data_dir.join("photos"))?;
-    let db_path = cfg.data_dir.join("homestock.sqlite3");
+    let db_path = cfg.database_path();
+    if let Some(parent) = db_path.parent().filter(|path| !path.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
     let db = db::Db::open(&db_path)?;
     {
         let seeds = cfg.seed_users.clone();
@@ -35,12 +38,32 @@ async fn main() -> anyhow_free::Result {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("listening on http://{addr}");
     axum::serve(listener, app)
-        .with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; /* + SIGTERM via tokio::signal::unix */ })
+        .with_graceful_shutdown(async {
+            if let Err(error) = shutdown_signal().await {
+                tracing::error!("failed to install shutdown signal handler: {error}");
+            }
+        })
         .await?;
 
     let _ = stop_tx.send(true);   // final backup if dirty
     let _ = backup_task.await;
     Ok(())
+}
+
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result?,
+            _ = terminate.recv() => {}
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await
+    }
 }
 
 /// Tiny boxed-error alias so the starter has no `anyhow` dependency. Swap for `anyhow` if preferred.

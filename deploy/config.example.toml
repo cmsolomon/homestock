@@ -1,0 +1,15 @@
+bind = "0.0.0.0:8080"
+data_dir = "/var/lib/homestock"
+database_path = "/var/lib/homestock/homestock.sqlite3"
+session_days = 30
+cookie_secure = true
+
+[backup]
+directory = "/var/backups/homestock"
+sentinel = ".homestock-nas"
+idle_secs = 300
+min_interval_secs = 1800
+max_interval_secs = 86400
+keep = 48
+stage_locally = true
+sync_photos = true

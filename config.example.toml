@@ -1,10 +1,11 @@
 bind     = "0.0.0.0:8080"
-data_dir = "/var/lib/homestock"        # homestock.sqlite3, photos/, staging/
+data_dir = "/var/lib/homestock"        # photos/ and locally staged backups
+database_path = "/var/lib/homestock/homestock.sqlite3"
 session_days = 30
 cookie_secure = true                # Set false only for local HTTP testing; keep true behind HTTPS.
 
 [backup]
-nas_dir            = "/mnt/nas"        # bind-mounted CIFS share (see IMPLEMENTATION.md §9)
+directory          = "/mnt/nas"        # backup destination (see IMPLEMENTATION.md §9)
 sentinel           = ".homestock-nas"  # must exist on the share, or backups are skipped
 idle_secs          = 300               # no requests for this long = idle
 min_interval_secs  = 1800              # at most one idle backup per 30 min
