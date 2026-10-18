@@ -23,16 +23,29 @@
         <a href="/search" class="h-10 rounded-xl border border-line bg-bg text-ink-3 text-[13px] flex items-center justify-between px-3">Search items, tags… <kbd class="text-[11px] border border-line-strong rounded-md px-1.5">/</kbd></a>
       </div>
       <nav class="px-2 flex flex-col gap-0.5">
-        <a href="/loc" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Places</a>
+        <a href="/loc" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Locations</a>
         <a href="/shopping" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Shopping list</a>
-        <a href="/in-use" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">In use</a>
+        <a href="/in-use" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Checked out</a>
         <a href="/household" class="h-10 px-3 rounded-xl flex items-center font-medium hover:bg-surface-2">Household</a>
       </nav>
       <div class="mx-4 mt-5 mb-1.5 text-[11px] font-semibold uppercase tracking-[.08em] text-ink-3">Locations</div>
       <a href="/loc" class="mx-2 mb-2 h-10 px-3 rounded-xl flex items-center text-ink-2 hover:bg-surface-2">All locations</a>
-      <div class="border-t border-line px-3 py-2.5 flex gap-2">
+      <div class="mt-auto border-t border-line px-3 pt-2.5">
+        <form method="post" action="/me/theme" class="mb-2"
+              onsubmit="document.getElementById('sidebar-theme-value').value = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">
+          <input type="hidden" id="sidebar-theme-value" name="theme" value="dark">
+          <input type="hidden" name="return_to" value="/">
+          <button id="sidebar-theme-button" class="h-10 w-full rounded-xl border border-line-strong text-[13px] font-medium whitespace-nowrap">Switch to dark mode</button>
+        </form>
+        <script>
+          document.getElementById('sidebar-theme-button').textContent =
+            document.documentElement.dataset.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+        </script>
+        <p class="mb-2 truncate px-1 text-xs text-ink-2" aria-label="Currently signed in as {{ user.name }}">Signed in as <span class="font-semibold text-ink">{{ user.name }}</span></p>
+        <div class="flex gap-2">
         <form class="flex-1" method="post" action="/logout"><button class="w-full h-10 rounded-xl border border-line-strong text-[13px] font-medium whitespace-nowrap">Sign out</button></form>
         <a href="/account" class="flex-1 h-10 rounded-xl border border-line-strong grid place-items-center text-[13px] font-medium">Account</a>
+        </div>
       </div>
     </aside>
 

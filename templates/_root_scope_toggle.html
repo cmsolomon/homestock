@@ -1,10 +1,13 @@
 <div class="flex items-center justify-between gap-3 border-t border-line pt-4">
-  <span class="text-[13px] font-medium text-ink-2">Show nested items</span>
-  <button type="button" role="switch" aria-checked="{% if nested %}true{% else %}false{% endif %}"
-          hx-get="/loc/contents?scope={% if nested %}level{% else %}nested{% endif %}"
-          hx-target="#root-contents" hx-push-url="/loc{% if nested %}?scope=level{% endif %}"
-          class="inline-flex h-10 items-center gap-2 rounded-full border border-line-strong bg-surface px-3 font-semibold whitespace-nowrap">
-    <span class="size-4 rounded-full {% if nested %}bg-accent{% else %}bg-line-strong{% endif %}"></span>
-    {% if nested %}On{% else %}Off{% endif %}
-  </button>
+  <div class="flex items-center gap-3">
+    <span class="text-[13px] font-medium text-ink-2">Show items:</span>
+    <div class="inline-flex rounded-full border border-line-strong bg-surface p-1">
+      <button type="button" aria-pressed="{% if nested %}false{% else %}true{% endif %}"
+              hx-get="/loc/contents?scope=level" hx-target="#root-contents" hx-push-url="/loc?scope=level"
+              class="h-9 rounded-full px-3 font-semibold whitespace-nowrap {% if !nested %}bg-accent text-accent-fg{% else %}text-ink-2{% endif %}">This level</button>
+      <button type="button" aria-pressed="{% if nested %}true{% else %}false{% endif %}"
+              hx-get="/loc/contents?scope=nested" hx-target="#root-contents" hx-push-url="/loc"
+              class="h-9 rounded-full px-3 font-semibold whitespace-nowrap {% if nested %}bg-accent text-accent-fg{% else %}text-ink-2{% endif %}">Nested</button>
+    </div>
+  </div>
 </div>

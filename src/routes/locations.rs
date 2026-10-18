@@ -1,11 +1,38 @@
 use crate::{auth::CurrentUser, error::AppError, repo::{items, locations}, routes::is_htmx, AppState};
 use askama::Template;
-use axum::{extract::{Path, Query, State}, http::HeaderMap, response::{Html, IntoResponse, Redirect, Response}, Form};
+use axum::{extract::{Path, Query, State}, http::{header, HeaderMap, HeaderValue}, response::{Html, IntoResponse, Redirect, Response}, Form};
+use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 
 #[derive(Deserialize, Default)]
 pub struct ScopeQ { pub scope: Option<String> }
 impl ScopeQ { pub fn nested(&self) -> bool { self.scope.as_deref() != Some("level") } }
+
+const SCOPE_COOKIE: &str = "hs_scope";
+
+fn nested_for(q: &ScopeQ, cookies: &CookieJar, cookie_name: &str) -> bool {
+    scope_preference(q.scope.as_deref(), cookies.get(cookie_name).map(|cookie| cookie.value()))
+}
+
+fn scope_preference(scope: Option<&str>, saved: Option<&str>) -> bool {
+    match scope {
+        Some("nested") => true,
+        Some("level") => false,
+        _ => saved.map_or(true, |value| value == "nested"),
+    }
+}
+
+fn save_scope_cookie(response: &mut Response, cookie_name: &str, nested: bool) -> Result<(), AppError> {
+    let cookie = format!(
+        "{cookie_name}={}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly",
+        if nested { "nested" } else { "level" },
+    );
+    response.headers_mut().append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).map_err(|e| AppError::internal(e.to_string()))?,
+    );
+    Ok(())
+}
 
 pub struct Crumb { pub id: i64, pub name: String }
 pub struct BoxCard { pub id: i64, pub name: String, pub kind: String, pub photo: Option<String>, pub meta: String }
@@ -125,18 +152,22 @@ pub async fn contents_oob(st: &AppState, id: i64, nested: bool) -> Result<String
     ))
 }
 
-pub async fn show(State(st): State<AppState>, user: CurrentUser, Path(id): Path<i64>, Query(q): Query<ScopeQ>) -> Result<Html<String>, AppError> {
-    let nested = q.nested();
+pub async fn show(State(st): State<AppState>, user: CurrentUser, Path(id): Path<i64>, Query(q): Query<ScopeQ>, cookies: CookieJar) -> Result<Html<String>, AppError> {
+    let nested = nested_for(&q, &cookies, SCOPE_COOKIE);
     let l = load(&st, id, nested).await?;
     Ok(Html(LocationPage { user, loc_id: id, title: l.title, kind: l.kind, meta: l.meta, crumbs: l.crumbs,
         nested, boxes: l.boxes, item_groups: l.item_groups }.render()?))
 }
 
 /// Returns location contents at the selected scope, including updated scope controls.
-pub async fn contents(State(st): State<AppState>, _u: CurrentUser, Path(id): Path<i64>, Query(q): Query<ScopeQ>) -> Result<Html<String>, AppError> {
-    let nested = q.nested();
+pub async fn contents(State(st): State<AppState>, _u: CurrentUser, Path(id): Path<i64>, Query(q): Query<ScopeQ>, cookies: CookieJar) -> Result<Response, AppError> {
+    let nested = nested_for(&q, &cookies, SCOPE_COOKIE);
     let l = load(&st, id, nested).await?;
-    Ok(Html(render_contents(l, id, nested)?))
+    let mut response = Html(render_contents(l, id, nested)?).into_response();
+    if q.scope.is_some() {
+        save_scope_cookie(&mut response, SCOPE_COOKIE, nested)?;
+    }
+    Ok(response)
 }
 
 fn root_data(c: &rusqlite::Connection, nested: bool) -> Result<(Vec<BoxCard>, Vec<ItemGroup>), AppError> {
@@ -168,19 +199,23 @@ fn root_data(c: &rusqlite::Connection, nested: bool) -> Result<(Vec<BoxCard>, Ve
     Ok((boxes, item_groups))
 }
 
-pub async fn root(State(st): State<AppState>, user: CurrentUser, Query(q): Query<ScopeQ>) -> Result<Html<String>, AppError> {
-    let nested = q.nested();
+pub async fn root(State(st): State<AppState>, user: CurrentUser, Query(q): Query<ScopeQ>, cookies: CookieJar) -> Result<Html<String>, AppError> {
+    let nested = nested_for(&q, &cookies, SCOPE_COOKIE);
     let (boxes, item_groups) = st.db.call(move |c| root_data(c, nested)).await?;
     let count = boxes.len();
     Ok(Html(RootPage { user, meta: plural(count as i64, "room", "rooms"), nested, boxes, item_groups }.render()?))
 }
 
-pub async fn root_contents(State(st): State<AppState>, _user: CurrentUser, Query(q): Query<ScopeQ>) -> Result<Html<String>, AppError> {
-    let nested = q.nested();
+pub async fn root_contents(State(st): State<AppState>, _user: CurrentUser, Query(q): Query<ScopeQ>, cookies: CookieJar) -> Result<Response, AppError> {
+    let nested = nested_for(&q, &cookies, SCOPE_COOKIE);
     let (boxes, item_groups) = st.db.call(move |c| root_data(c, nested)).await?;
     let contents = RootContents { boxes, item_groups }.render()?;
     let toggle = RootScopeToggle { nested }.render()?;
-    Ok(Html(format!("{contents}<div id=\"root-scope-toggle\" hx-swap-oob=\"innerHTML\">{toggle}</div>")))
+    let mut response = Html(format!("{contents}<div id=\"root-scope-toggle\" hx-swap-oob=\"innerHTML\">{toggle}</div>")).into_response();
+    if q.scope.is_some() {
+        save_scope_cookie(&mut response, SCOPE_COOKIE, nested)?;
+    }
+    Ok(response)
 }
 
 pub async fn new_root(_user: CurrentUser) -> Result<Html<String>, AppError> {
@@ -296,5 +331,14 @@ mod tests {
         assert_eq!(nested_groups.len(), 2);
         assert!(nested_groups.iter().any(|group| group.label == "Garage" && group.items[0].name == "Loose item"));
         assert!(nested_groups.iter().any(|group| group.label == "Garage › Shelf" && group.items[0].name == "Box item"));
+    }
+
+    #[test]
+    fn nested_scope_selection_is_shared_between_places_pages() {
+        assert_eq!(SCOPE_COOKIE, "hs_scope");
+        assert!(!scope_preference(None, Some("level")));
+        assert!(scope_preference(None, Some("nested")));
+        assert!(scope_preference(Some("nested"), Some("level")));
+        assert!(!scope_preference(Some("level"), Some("nested")));
     }
 }

@@ -37,6 +37,10 @@ fn temp_password() -> String {
 #[template(path = "temp_password.html")]
 pub struct TempPasswordPage { pub name:String, pub password:String, pub action:String }
 
+#[derive(Template)]
+#[template(path = "_reset_password_result.html")]
+pub struct ResetPasswordResult { pub name:String, pub password:String }
+
 #[derive(Deserialize)]
 pub struct AddForm { name:String, role:String }
 
@@ -61,15 +65,24 @@ pub async fn reset(State(st):State<AppState>,admin:AdminUser,Path(id):Path<i64>)
     let password=temp_password();
     let pw=password.clone();
     let hash=tokio::task::spawn_blocking(move||auth::hash(&pw)).await.map_err(|e|AppError::internal(e.to_string()))??;
-    let name=st.db.call(move|c|{
-        let tx=c.transaction()?;
-        let name=tx.query_row("SELECT name FROM user WHERE id=?1 AND deleted_at IS NULL",[id],|r|r.get::<_,String>(0)).optional()?.ok_or(AppError::NotFound)?;
-        tx.execute("UPDATE user SET password_hash=?2,must_change_pw=1 WHERE id=?1 AND deleted_at IS NULL",params![id,hash])?;
-        tx.execute("DELETE FROM session WHERE user_id=?1",[id])?;
-        tx.commit()?;
-        Ok(name)
-    }).await?;
-    Ok(Html(TempPasswordPage{name,password,action:"The old password no longer works; open sessions have been signed out.".into()}.render()?))
+    let name=st.db.call(move|c|set_temporary_password(c,id,&hash)).await?;
+    Ok(Html(ResetPasswordResult{name,password}.render()?))
+}
+
+fn set_temporary_password(c:&mut rusqlite::Connection,id:i64,password_hash:&str)->Result<String,AppError>{
+    let tx=c.transaction()?;
+    let name=tx.query_row(
+        "SELECT name FROM user WHERE id=?1 AND deleted_at IS NULL",
+        [id],
+        |r|r.get::<_,String>(0),
+    ).optional()?.ok_or(AppError::NotFound)?;
+    tx.execute(
+        "UPDATE user SET password_hash=?2,must_change_pw=1 WHERE id=?1 AND deleted_at IS NULL",
+        params![id,password_hash],
+    )?;
+    tx.execute("DELETE FROM session WHERE user_id=?1",[id])?;
+    tx.commit()?;
+    Ok(name)
 }
 
 #[derive(Deserialize)]
@@ -185,6 +198,29 @@ mod tests {
         c.execute("INSERT INTO item(name,location_id,qty) VALUES ('Tools',1,1)",[]).expect("insert item");
         c.execute("INSERT INTO checkout(item_id,qty,user_id) VALUES (1,1,2)",[]).expect("insert checkout");
         assert!(matches!(remove_user(&mut c,2),Err(AppError::Conflict(_))));
+    }
+
+    #[test]
+    fn password_reset_updates_hash_requires_change_and_revokes_sessions(){
+        let mut c=database();
+        c.execute("INSERT INTO user(name,role,password_hash) VALUES ('Sam','member','old-hash')",[])
+            .expect("insert member");
+        c.execute("INSERT INTO session(token,user_id,expires_at) VALUES ('sam-session',2,9999999999)",[])
+            .expect("insert session");
+        let hash=auth::hash("temporary-password").expect("hash temporary password");
+
+        let name=set_temporary_password(&mut c,2,&hash).expect("reset password");
+
+        let stored_hash:String=c.query_row("SELECT password_hash FROM user WHERE id=2",[],|r|r.get(0))
+            .expect("read stored hash");
+        let must_change:bool=c.query_row("SELECT must_change_pw FROM user WHERE id=2",[],|r|r.get(0))
+            .expect("read must-change flag");
+        let sessions:i64=c.query_row("SELECT COUNT(*) FROM session WHERE user_id=2",[],|r|r.get(0))
+            .expect("count user sessions");
+        assert_eq!(name,"Sam");
+        assert!(auth::verify("temporary-password",&stored_hash));
+        assert!(must_change);
+        assert_eq!(sessions,0);
     }
 
     #[test]

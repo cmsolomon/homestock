@@ -62,15 +62,17 @@ pub async fn change_password(State(st): State<AppState>, user: CurrentUser, Form
 }
 
 #[derive(Deserialize)]
-pub struct ThemeForm { theme: String }
+pub struct ThemeForm { theme: String, return_to: Option<String> }
 
 pub async fn theme(State(st): State<AppState>, user: CurrentUser, Form(f): Form<ThemeForm>) -> Result<Redirect, AppError> {
     if !["light","dark","system"].contains(&f.theme.as_str()) { return Err(AppError::bad("Choose a valid theme.")); }
+    let return_to = f.return_to.as_deref().unwrap_or("/account");
+    if !["/","/account"].contains(&return_to) { return Err(AppError::bad("Invalid return destination.")); }
     st.db.call(move |c| {
         c.execute("UPDATE user SET theme=?2 WHERE id=?1",params![user.id,f.theme])?;
         Ok(())
     }).await?;
-    Ok(Redirect::to("/account"))
+    Ok(Redirect::to(return_to))
 }
 
 #[cfg(test)]
