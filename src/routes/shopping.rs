@@ -12,7 +12,7 @@ pub struct ShopRow {
     pub item_id: Option<i64>, pub location: Option<String>, pub unit: String,
 }
 
-pub struct StockRow { pub id: i64, pub name: String, pub qty: i64, pub available: i64, pub min_qty: i64, pub unit: String, pub location: String, pub listed: bool }
+pub struct StockRow { pub id: i64, pub name: String, pub available: i64, pub unit: String, pub location: String, pub listed: bool }
 pub struct LocationOption { pub id: i64, pub name: String }
 pub struct ShareItem { pub name:String, pub qty:i64, pub unit:String, pub location:String }
 
@@ -55,14 +55,14 @@ pub async fn index(State(st): State<AppState>, user: CurrentUser, Query(q): Quer
         }
         let load_stock = |condition: &str| -> Result<Vec<StockRow>, AppError> {
             let sql = format!(
-                "SELECT s.id,s.name,s.qty,s.available,s.min_qty,s.unit,s.location_id,
+                "SELECT s.id,s.name,s.available,s.unit,s.location_id,
                         EXISTS(SELECT 1 FROM shop WHERE item_id=s.id AND bought_at IS NULL)
                  FROM item_status s WHERE {condition} ORDER BY s.name COLLATE NOCASE");
             let mut stmt = c.prepare(&sql)?;
-            let raw = stmt.query_map([], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,
-                r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?,r.get::<_,bool>(7)?)))?
+            let raw = stmt.query_map([], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,
+                r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,bool>(5)?)))?
                 .collect::<Result<Vec<_>,_>>()?;
-            raw.into_iter().map(|r| Ok(StockRow { id:r.0,name:r.1,qty:r.2,available:r.3,min_qty:r.4,unit:r.5,location:locations::path_text(c,r.6)?,listed:r.7 })).collect()
+            raw.into_iter().map(|r| Ok(StockRow { id:r.0,name:r.1,available:r.2,unit:r.3,location:locations::path_text(c,r.4)?,listed:r.5 })).collect()
         };
         let mut stmt = c.prepare_cached("SELECT id,name FROM location ORDER BY name COLLATE NOCASE")?;
         let locations = stmt.query_map([], |r| Ok(LocationOption { id:r.get(0)?, name:r.get(1)? }))?
@@ -168,7 +168,8 @@ fn add_item_to_list(c: &rusqlite::Connection, id: i64) -> Result<(StockRow, usiz
         [id],
     )?;
     let row = load_stock_item(c, id)?;
-    let buy_count: usize = c.query_row("SELECT COUNT(*) FROM shop WHERE bought_at IS NULL", [], |r| r.get(0))?;
+    let count: i64 = c.query_row("SELECT COUNT(*) FROM shop WHERE bought_at IS NULL", [], |r| r.get(0))?;
+    let buy_count = usize::try_from(count).map_err(|_| AppError::internal("shopping-list count is outside the supported range"))?;
     Ok((row, buy_count))
 }
 
@@ -177,7 +178,8 @@ fn remove_open_item(c: &rusqlite::Connection, id: i64) -> Result<(StockRow, usiz
         return Err(AppError::conflict("This item is no longer on the shopping list"));
     }
     let row = load_stock_item(c, id)?;
-    let buy_count: usize = c.query_row("SELECT COUNT(*) FROM shop WHERE bought_at IS NULL", [], |r| r.get(0))?;
+    let count: i64 = c.query_row("SELECT COUNT(*) FROM shop WHERE bought_at IS NULL", [], |r| r.get(0))?;
+    let buy_count = usize::try_from(count).map_err(|_| AppError::internal("shopping-list count is outside the supported range"))?;
     Ok((row, buy_count))
 }
 
@@ -190,16 +192,16 @@ fn toggle_purchase(c: &rusqlite::Connection, id: i64) -> Result<(), AppError> {
 
 fn load_stock_item(c: &rusqlite::Connection, id: i64) -> Result<StockRow, AppError> {
     let raw = c.query_row(
-        "SELECT s.id,s.name,s.qty,s.available,s.min_qty,s.unit,s.location_id,
+        "SELECT s.id,s.name,s.available,s.unit,s.location_id,
                 EXISTS(SELECT 1 FROM shop WHERE item_id=s.id AND bought_at IS NULL)
          FROM item_status s WHERE s.id=?1",
         [id],
-        |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,
-            r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?,r.get::<_,bool>(7)?)),
+        |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,
+            r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,bool>(5)?)),
     ).optional()?.ok_or(AppError::NotFound)?;
     Ok(StockRow {
-        id:raw.0,name:raw.1,qty:raw.2,available:raw.3,min_qty:raw.4,unit:raw.5,
-        location:locations::path_text(c,raw.6)?,listed:raw.7,
+        id:raw.0,name:raw.1,available:raw.2,unit:raw.3,
+        location:locations::path_text(c,raw.4)?,listed:raw.5,
     })
 }
 

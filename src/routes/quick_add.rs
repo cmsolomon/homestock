@@ -3,11 +3,9 @@ use askama::Template;
 use axum::{extract::{Multipart, Path, Query, State}, response::{Html, IntoResponse, Redirect, Response}};
 use serde::Deserialize;
 
-pub struct LocOpt { pub id: i64, pub name: String, pub depth: usize }
-
 #[derive(Template)]
 #[template(path = "quick_add.html")]
-pub struct Sheet { pub loc_id: i64, pub loc_name: String, pub path: String, pub sticky_tags: String, pub nested: bool }
+pub struct Sheet { pub loc_id: i64, pub path: String, pub sticky_tags: String, pub nested: bool }
 
 #[derive(Deserialize, Default)]
 pub struct QuickAddQuery { pub scope: Option<String> }
@@ -19,8 +17,11 @@ pub struct QaRow { pub id: i64, pub name: String, pub qty_label: String, pub pho
 
 /// GET /loc/{id}/quick-add → the sheet partial, locked to {id}.
 pub async fn sheet(State(st): State<AppState>, _u: CurrentUser, Path(id): Path<i64>, Query(q): Query<QuickAddQuery>) -> Result<Html<String>, AppError> {
-    let (name, path) = st.db.call(move |c| Ok((locations::get(c, id)?.name, locations::path_text(c, id)?))).await?;
-    Ok(Html(Sheet { loc_id: id, loc_name: name, path, sticky_tags: String::new(), nested: q.nested() }.render()?))
+    let path = st.db.call(move |c| {
+        locations::get(c, id)?;
+        locations::path_text(c, id)
+    }).await?;
+    Ok(Html(Sheet { loc_id: id, path, sticky_tags: String::new(), nested: q.nested() }.render()?))
 }
 
 /// GET /quick-add → the global “+”: reopen on the last box this user added to.

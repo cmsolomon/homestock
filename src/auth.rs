@@ -1,5 +1,5 @@
 use crate::{config::SeedUser, error::AppError, AppState};
-use argon2::{password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString}, Argon2};
+use argon2::{password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier}, Argon2};
 use axum::{extract::{FromRef, FromRequestParts}, http::request::Parts};
 use axum_extra::extract::CookieJar;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -10,7 +10,7 @@ pub const COOKIE: &str = "hs_session";
 pub struct CurrentUser { pub id: i64, pub name: String, pub is_admin: bool, pub theme: String, pub must_change_pw: bool }
 
 pub fn hash(pw: &str) -> Result<String, AppError> {
-    Argon2::default().hash_password(pw.as_bytes(), &SaltString::generate(&mut OsRng))
+    Argon2::default().hash_password(pw.as_bytes())
         .map(|h| h.to_string()).map_err(|e| AppError::internal(e.to_string()))
 }
 pub fn verify(pw: &str, stored: &str) -> bool {

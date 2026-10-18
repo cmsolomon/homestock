@@ -1,7 +1,6 @@
 use crate::{auth::{self, AdminUser, CurrentUser}, error::AppError, AppState};
 use askama::Template;
 use axum::{extract::{Form, Path, State}, response::{Html, Redirect}};
-use rand::{rngs::OsRng, Rng};
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
@@ -29,8 +28,7 @@ pub async fn page(State(st): State<AppState>, user: CurrentUser) -> Result<Html<
 
 fn temp_password() -> String {
     const WORDS:&[&str]=&["maple","river","cedar","meadow","harbor","copper","willow","morning","silver","garden","cabin","cloud"];
-    let mut rng=OsRng;
-    format!("{}-{}-{:02}",WORDS[rng.gen_range(0..WORDS.len())],WORDS[rng.gen_range(0..WORDS.len())],rng.gen_range(10..100))
+    format!("{}-{}-{:02}",WORDS[rand::random_range(0..WORDS.len())],WORDS[rand::random_range(0..WORDS.len())],rand::random_range(10..100))
 }
 
 #[derive(Template)]

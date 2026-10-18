@@ -7,7 +7,6 @@ use axum::{
 };
 use axum_extra::extract::CookieJar;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rand::{rngs::OsRng, RngCore};
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
@@ -70,7 +69,7 @@ pub async fn login(State(st): State<AppState>, Form(f): Form<Credentials>) -> Re
     }
 
     let mut token = [0u8; 32];
-    OsRng.fill_bytes(&mut token);
+    rand::fill(&mut token);
     let token = URL_SAFE_NO_PAD.encode(token);
     let token_for_db = token.clone();
     let days = st.cfg.session_days;
@@ -118,7 +117,7 @@ pub async fn setup(State(st): State<AppState>, Form(f): Form<SetupForm>) -> Resu
     }).await?;
     let mut response = Redirect::to("/loc").into_response();
     let mut token = [0u8; 32];
-    OsRng.fill_bytes(&mut token);
+    rand::fill(&mut token);
     let token = URL_SAFE_NO_PAD.encode(token);
     let token_db = token.clone();
     let days = st.cfg.session_days;

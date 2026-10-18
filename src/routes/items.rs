@@ -162,21 +162,21 @@ pub async fn consume(State(st): State<AppState>, _user: CurrentUser, Path(id): P
 pub struct InUsePage { pub user: CurrentUser, pub entries: Vec<CheckoutRow>, pub people: Vec<Person>, pub destinations: Vec<Destination> }
 
 pub struct CheckoutRow {
-    pub id: i64, pub item_id: i64, pub item: String, pub qty: i64, pub unit: String,
+    pub id: i64, pub item: String, pub qty: i64, pub unit: String,
     pub person: String, pub location: String,
 }
 
 pub async fn in_use(State(st): State<AppState>, user: CurrentUser) -> Result<Html<String>, AppError> {
     let (entries,people,destinations) = st.db.call(|c| {
         let mut stmt = c.prepare_cached(
-            "SELECT co.id, i.id, i.name, co.qty, i.unit, u.name, i.location_id
+            "SELECT co.id, i.name, co.qty, i.unit, u.name, i.location_id
              FROM checkout co JOIN item i ON i.id=co.item_id JOIN user u ON u.id=co.user_id
              ORDER BY u.name COLLATE NOCASE, i.name COLLATE NOCASE",
         )?;
-        let raw = stmt.query_map([], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,
-            r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?)))?
+        let raw = stmt.query_map([], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,
+            r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,i64>(5)?)))?
             .collect::<Result<Vec<_>,_>>()?;
-        let entries=raw.into_iter().map(|r| Ok(CheckoutRow { id:r.0,item_id:r.1,item:r.2,qty:r.3,unit:r.4,person:r.5,location:locations::path_text(c,r.6)? })).collect::<Result<Vec<_>,AppError>>()?;
+        let entries=raw.into_iter().map(|r| Ok(CheckoutRow { id:r.0,item:r.1,qty:r.2,unit:r.3,person:r.4,location:locations::path_text(c,r.5)? })).collect::<Result<Vec<_>,AppError>>()?;
         let mut stmt=c.prepare_cached("SELECT id,name FROM user WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE")?;
         let people=stmt.query_map([],|r|Ok(Person{id:r.get(0)?,name:r.get(1)?}))?.collect::<Result<Vec<_>,_>>()?;
         let mut stmt=c.prepare_cached("SELECT id,name FROM location ORDER BY name COLLATE NOCASE")?;

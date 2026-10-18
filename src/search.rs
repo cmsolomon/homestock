@@ -8,7 +8,7 @@ pub enum Status { InUse, Low, UsedUp }
 #[derive(Debug)]
 pub struct Hit {
     pub id: i64, pub name: String, pub path: String, pub qty: i64, pub unit: String,
-    pub in_use: i64, pub is_low: bool, pub is_used_up: bool, pub score: u32,
+    pub is_low: bool, pub is_used_up: bool, pub score: u32,
 }
 
 pub fn tokenize(q: &str) -> Vec<String> {
@@ -76,7 +76,7 @@ pub fn search(c: &Connection, q: &str, tags: &[String], status: Option<Status>, 
         None => {}
     }
     let sql = format!(
-        "SELECT s.id, s.name, f.path, s.qty, s.unit, s.in_use, s.is_low, s.is_used_up,
+        "SELECT s.id, s.name, f.path, s.qty, s.unit, s.is_low, s.is_used_up,
                 f.name || ' ' || f.notes || ' ' || f.tags || ' ' || f.path
          FROM item_fts f JOIN item_status s ON s.id = f.rowid
          {} LIMIT 400",
@@ -85,8 +85,8 @@ pub fn search(c: &Connection, q: &str, tags: &[String], status: Option<Status>, 
     let mut st = c.prepare(&sql)?;
     let rows = st.query_map(params_from_iter(args.iter()), |r| Ok((
         Hit { id: r.get(0)?, name: r.get(1)?, path: r.get(2)?, qty: r.get(3)?, unit: r.get(4)?,
-              in_use: r.get(5)?, is_low: r.get(6)?, is_used_up: r.get(7)?, score: 0 },
-        r.get::<_, String>(8)?,
+              is_low: r.get(5)?, is_used_up: r.get(6)?, score: 0 },
+        r.get::<_, String>(7)?,
     )))?;
 
     let mut hits = Vec::new();

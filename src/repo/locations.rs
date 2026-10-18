@@ -2,7 +2,7 @@ use crate::{error::AppError, repo::items::reindex};
 use rusqlite::{params, Connection, OptionalExtension};
 
 #[derive(Debug, Clone)]
-pub struct Location { pub id: i64, pub name: String, pub kind: String, pub parent_id: Option<i64>, pub photo: Option<String> }
+pub struct Location { pub name: String, pub kind: String, pub parent_id: Option<i64> }
 
 #[derive(Debug, Clone)]
 pub struct BoxStats { pub id: i64, pub name: String, pub kind: String, pub photo: Option<String>, pub items: i64, pub boxes: i64 }
@@ -11,8 +11,8 @@ const SUBTREE: &str = "WITH RECURSIVE sub(id) AS (
     SELECT ?1 UNION ALL SELECT l.id FROM location l JOIN sub ON l.parent_id = sub.id)";
 
 pub fn get(c: &Connection, id: i64) -> Result<Location, AppError> {
-    Ok(c.query_row("SELECT id,name,kind,parent_id,photo FROM location WHERE id=?1", [id], |r| Ok(Location {
-        id: r.get(0)?, name: r.get(1)?, kind: r.get(2)?, parent_id: r.get(3)?, photo: r.get(4)?,
+    Ok(c.query_row("SELECT name,kind,parent_id FROM location WHERE id=?1", [id], |r| Ok(Location {
+        name: r.get(0)?, kind: r.get(1)?, parent_id: r.get(2)?,
     }))?)
 }
 
