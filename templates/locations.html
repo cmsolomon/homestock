@@ -8,7 +8,10 @@
       <h1 class="mt-0.5 text-[26px] leading-tight tracking-[-.02em] font-bold">All locations</h1>
       <p class="mt-1 text-[13px] text-ink-2">{{ meta }}</p>
     </div>
-    <button hx-get="/loc/new" hx-target="#sheet" class="h-11 px-4 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">+ Add room</button>
+    <div class="flex flex-wrap gap-2">
+      <a href="/export.csv" class="h-11 px-4 rounded-btn border border-line-strong bg-surface font-semibold grid place-items-center whitespace-nowrap">Export all items CSV</a>
+      <button hx-get="/loc/new" hx-target="#sheet" class="h-11 px-4 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">+ Add room</button>
+    </div>
   </header>
   {% if !boxes.is_empty() %}<div id="root-scope-toggle">{% include "_root_scope_toggle.html" %}</div>{% endif %}
   <div id="root-contents">{% include "_root_contents.html" %}</div>

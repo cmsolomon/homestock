@@ -49,6 +49,34 @@ fn migrate(conn: &Connection) -> Result<(), AppError> {
     if v < 1 {
         conn.execute_batch(include_str!("../migrations/0001_init.sql"))?;
     }
-    // if v < 2 { conn.execute_batch(include_str!("../migrations/0002_….sql"))?; }
+    if v < 2 {
+        conn.execute_batch(include_str!("../migrations/0002_soft_delete_users.sql"))?;
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::migrate;
+    use rusqlite::Connection;
+
+    #[test]
+    fn migration_adds_deleted_at_to_existing_user_table() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        conn.execute_batch(include_str!("../migrations/0001_init.sql")).expect("apply schema v1");
+        conn.execute("INSERT INTO user(name,role,password_hash) VALUES ('Alex','admin','hash')", [])
+            .expect("insert existing user");
+
+        migrate(&conn).expect("apply latest migrations");
+
+        let deleted_at: Option<i64> = conn.query_row(
+            "SELECT deleted_at FROM user WHERE name='Alex'",
+            [],
+            |row| row.get(0),
+        ).expect("read migrated user");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(deleted_at, None);
+        assert_eq!(version, 2);
+    }
 }

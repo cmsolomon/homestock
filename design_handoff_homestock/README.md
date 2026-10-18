@@ -33,6 +33,7 @@ How to open the references: put the `design/` folder anywhere and open `Home Inv
 ## Information architecture & routes
 
 ```
+/                      Home: sign in/setup when signed out; inventory when signed in
 /login                 Sign in (unauthenticated)
 /loc                   All locations (top-level rooms)
 /loc/:id               Location / container view (any depth)
@@ -54,7 +55,7 @@ item      id, name, notes NULL, location_id, qty ≥0, unit 'pcs', min_qty 0, ph
 tag / item_tag                                                       (many-to-many)
 checkout  id, item_id, qty >0, user_id, checked_out_at               (deleted on return — no history kept)
 shop      id, name, item_id NULL, qty, bought_at NULL, created_at    (one open entry per item)
-user      id, name, role, password_hash (argon2id), must_change_pw, theme ('light'|'dark'|'system'), last_location_id
+user      id, name, role, password_hash (argon2id), must_change_pw, theme ('light'|'dark'|'system'), last_location_id, deleted_at
 session   token, user_id, created_at, expires_at
 item_fts  FTS5 trigram (name, notes, tags, path)       (app-maintained)
 ```
@@ -95,9 +96,10 @@ PATCH  /api/checkouts/:id {userId}             POST /api/checkouts/:id/put-away 
 POST   /api/checkouts/:id/consume {addToList}
 GET/POST/PATCH/DELETE /api/shopping[/id]       POST /api/shopping/:id/restock {locationId?}
 GET    /api/search?q=&tags=&status=
-GET    /api/export.csv
+GET    /export.csv[?location_id={id}]  (all inventory, or a location and its nested boxes)
 ```
 CSV columns: `id,name,quantity,unit,available,in_use,checked_out_by,location,tags`. `checked_out_by` is `"Sam (1); Mia (2)"`, `location` is the full path joined with ` › `, and `tags` are joined with `; `. Values are RFC 4180 quoted.
+The All locations page exports the full inventory; each room/box page exports its subtree and keeps the full box path in every row.
 
 ---
 
@@ -190,13 +192,15 @@ Input 52px r16, placeholder "Search items, tags, places — typos are fine", cle
 Full-screen, centred column max 400: 56px accent tile, "Sign in to Homestock" 24/700, "Our home · homestock.local". "Who’s signing in?" grid of 2 user tiles (56px, r16, avatar 30). Password input 52px (`autocomplete=current-password`). The error state turns the input border `--gone` and shows the inline message "That password doesn’t match. Try again or ask an admin to reset it." Primary **Sign in as {name}** 56px. Footnote: "Forgot your password? Ask an admin to reset it under Household." After sign-in, go to the last screen, or to /account if `must_change_pw`. **First run** (no users): same layout, creates the first admin.
 
 ### 11. Account
-Banner (low-soft) when `must_change_pw`: "Choose a new password to continue." Profile card (52 avatar, name, "Admin · signed in on this device"). Change password: current / new ("At least 8 characters") / confirm. Errors, shown inline in `--gone`: "Current password is incorrect.", "New password needs at least 8 characters.", "The two new passwords don’t match.", "Choose a password different from the current one." Success: "Password updated." in `--ok`. **Sign out** (52px secondary, `--gone` text).
+Banner (low-soft) when `must_change_pw`: "Choose a new password to continue." Profile card (52 avatar, name, "Admin · signed in on this device"). Change password: current / new ("At least 8 characters") / confirm. Errors, shown inline in `--gone`: "Current password is incorrect.", "New password needs at least 8 characters.", "The two new passwords don’t match.", "Choose a password different from the current one." Success: "Password updated." in `--ok`. **Sign out**, **Sign in as another user**, and **Log me out everywhere** (revokes all sessions for that user).
 
 ### 12. Household & users
-Title "Household & users" + explainer. Member rows (min 64, r18): avatar 38, name ("Alex (you)"), role badge (Admin = accent-soft/accent, Member = surface-2/text-2), "Temporary password" badge (low) when must_change, sub "1 checked out" / "Nothing checked out". Admin actions on others: **Reset password**, **Make admin / Make member**, **Remove** (gone text). **+ Add member** (admin only); members see "Only admins can add, remove or reset members." Then the Data card (Export inventory → **Download CSV**) and Appearance (Light | Dark segmented).
+Title "Household & users" + explainer. Member rows (min 64, r18): avatar 38, name ("Alex (you)"), role badge (Admin = accent-soft/accent, Member = surface-2/text-2), "Temporary password" badge (low) when must_change, sub "1 checked out" / "Nothing checked out". Admin actions on others: **Generate temporary password**, **Set temporary password**, **Make admin / Make member**, **Remove** (gone text). Setting a temporary password signs out the user and requires them to choose a new password at sign-in. Admins can remove their own account only when another admin remains; checked-out items must be returned first. **+ Add user** (admin only); members see "Only admins can add, remove or reset members." Then the Data card (Export inventory → **Download CSV**) and Appearance (Light | Dark segmented).
 - Add member dialog: name, role cards (Member "Browse, add, check out" / Admin "Also manages users"), temporary password shown in monospace 21px (format `word-word-NN`).
-- Reset password dialog: the temp password + warning "{name}’s current password stops working immediately and any open sessions are signed out."
-- Remove dialog: blocked (confirm disabled) if the user has checkouts or is the last admin, with an explanatory message.
+- Generate temporary password: displays the temporary password; the current password stops working and open sessions are signed out. The user must choose their own password after signing in.
+- Set temporary password: admin enters and confirms a password (12+ characters); existing sessions are signed out and the user must choose a new password at sign-in.
+- Any signed-in user can change their own password from Account using their current password. If forgotten while signed out, ask an admin for a temporary password.
+- Remove: blocked if the user has checked-out items or is the last active admin; an admin can remove their own account only when another active admin remains. Removal signs out sessions and retains the account record; deleted names remain reserved and cannot be reused.
 
 ## Drag & drop (pointer devices only)
 Sources: box cards (moves the box + all descendants) and item cards (moves the whole record). Targets: box cards, breadcrumb segments, sidebar tree rows, the empty-box zone. The source fades to opacity .4 while dragging. A valid target gets `inset 0 0 0 2px var(--accent)` + accent-soft fill; box cards also show the overlay "Drop into {name}". Invalid targets (self, descendants, current parent) get no highlight and do nothing. On drop: optimistic move and the toast "Moved Storage Box 12 and 4 items to Garage". Touch never relies on drag; use Move….
@@ -208,7 +212,7 @@ Sources: box cards (moves the box + all descendants) and item cards (moves the w
 - **Keyboard:** `/` focuses search (outside inputs); `Esc` closes dialog / detail / drawer.
 - **Theme:** `data-theme` on `<html>`, rendered by the server from `user.theme` (persisted **per user**, toggled with `POST /me/theme`). `system` and the sign-in screen follow `prefers-color-scheme`.
 - **Disabled:** opacity .45 + the `disabled` attribute.
-- **Auth:** HttpOnly SameSite=Lax session cookie, 30-day sliding expiry, argon2id, 5 login attempts/min rate limit. Members cannot call admin endpoints. Admins cannot remove themselves or the last admin.
+- **Auth:** HttpOnly SameSite=Lax session cookie, 30-day sliding expiry, argon2id, 5 login attempts/min rate limit. Members cannot call admin endpoints. The last admin cannot be removed; an admin can remove their own account only if another admin remains.
 
 ## Touch targets
 44×44 minimum everywhere (icon buttons get the full 44). Dialog steppers use 56px buttons; long-press repeats after 400ms at 10/s. Primary sheet actions are 52–56px tall and full width above the safe-area inset. Checkbox rows have a 48px hit area. Keep ≥ 8px between adjacent targets. Inputs use a 16px font.

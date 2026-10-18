@@ -1,6 +1,6 @@
-use crate::{auth::{self, CurrentUser}, error::AppError, AppState};
+use crate::{auth::{self, CurrentUser, COOKIE}, error::AppError, AppState};
 use askama::Template;
-use axum::{extract::{Form, State}, response::{Html, Redirect}};
+use axum::{extract::{Form, State}, http::{header, HeaderValue}, response::{Html, IntoResponse, Redirect, Response}};
 use rusqlite::params;
 use serde::Deserialize;
 
@@ -12,11 +12,30 @@ pub async fn page(user: CurrentUser) -> Result<Html<String>, AppError> {
     Ok(Html(AccountPage { user }.render()?))
 }
 
+pub async fn logout_everywhere(State(st): State<AppState>, user: CurrentUser) -> Result<Response, AppError> {
+    let user_id = user.id;
+    st.db.call(move |c| revoke_sessions(c, user_id)).await?;
+    let secure = if st.cfg.cookie_secure { "; Secure" } else { "" };
+    let cookie = format!("{COOKIE}=; HttpOnly; SameSite=Lax{secure}; Path=/; Max-Age=0");
+    let mut response = Redirect::to("/login").into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).map_err(|e| AppError::internal(e.to_string()))?,
+    );
+    Ok(response)
+}
+
+fn revoke_sessions(c: &rusqlite::Connection, user_id: i64) -> Result<(), AppError> {
+    c.execute("DELETE FROM session WHERE user_id=?1", [user_id])?;
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct PasswordForm { current: String, next: String, confirm: String }
 
 pub async fn change_password(State(st): State<AppState>, user: CurrentUser, Form(f): Form<PasswordForm>) -> Result<Redirect, AppError> {
     if f.next.len() < 8 { return Err(AppError::bad("New password needs at least 8 characters.")); }
+    if f.next.len() > 1024 { return Err(AppError::bad("New password must be 1024 characters or fewer.")); }
     if f.next != f.confirm { return Err(AppError::bad("The two new passwords don’t match.")); }
     let user_id = user.id;
     let old_hash = st.db.call(move |c| {
@@ -52,4 +71,31 @@ pub async fn theme(State(st): State<AppState>, user: CurrentUser, Form(f): Form<
         Ok(())
     }).await?;
     Ok(Redirect::to("/account"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::revoke_sessions;
+    use rusqlite::Connection;
+
+    #[test]
+    fn logging_out_everywhere_removes_only_the_users_sessions() {
+        let c = Connection::open_in_memory().expect("open in-memory database");
+        c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
+        c.execute_batch(include_str!("../../migrations/0002_soft_delete_users.sql")).expect("apply user migration");
+        c.execute_batch(
+            "INSERT INTO user(name,role,password_hash) VALUES ('Alex','admin','hash'),('Sam','member','hash');
+             INSERT INTO session(token,user_id,expires_at) VALUES
+               ('alex-device-1',1,9999999999),('alex-device-2',1,9999999999),('sam-device',2,9999999999);",
+        ).expect("insert users and sessions");
+
+        revoke_sessions(&c, 1).expect("revoke Alex sessions");
+
+        let alex_sessions: i64 = c.query_row("SELECT COUNT(*) FROM session WHERE user_id=1", [], |r| r.get(0))
+            .expect("count Alex sessions");
+        let sam_sessions: i64 = c.query_row("SELECT COUNT(*) FROM session WHERE user_id=2", [], |r| r.get(0))
+            .expect("count Sam sessions");
+        assert_eq!(alex_sessions, 0);
+        assert_eq!(sam_sessions, 1);
+    }
 }

@@ -19,7 +19,7 @@ pub fn verify(pw: &str, stored: &str) -> bool {
 
 /// Only when the user table is empty. Seeded accounts must change their password.
 pub fn seed_users(c: &mut Connection, seeds: &[SeedUser]) -> Result<(), AppError> {
-    let n: i64 = c.query_row("SELECT COUNT(*) FROM user", [], |r| r.get(0))?;
+    let n: i64 = c.query_row("SELECT COUNT(*) FROM user WHERE deleted_at IS NULL", [], |r| r.get(0))?;
     if n > 0 || seeds.is_empty() { return Ok(()); }
     let tx = c.transaction()?;
     for s in seeds {
@@ -34,7 +34,8 @@ pub fn seed_users(c: &mut Connection, seeds: &[SeedUser]) -> Result<(), AppError
 pub fn lookup_session(c: &Connection, token: &str) -> Result<Option<CurrentUser>, AppError> {
     let u = c.query_row(
         "SELECT u.id, u.name, u.role = 'admin', u.theme, u.must_change_pw, s.expires_at
-         FROM session s JOIN user u ON u.id = s.user_id WHERE s.token = ?1 AND s.expires_at > unixepoch()",
+         FROM session s JOIN user u ON u.id = s.user_id
+         WHERE s.token = ?1 AND s.expires_at > unixepoch() AND u.deleted_at IS NULL",
         [token], |r| Ok((CurrentUser { id: r.get(0)?, name: r.get(1)?, is_admin: r.get(2)?, theme: r.get(3)?, must_change_pw: r.get(4)? }, r.get::<_, i64>(5)?)),
     ).optional()?;
     if let Some((user, exp)) = u {

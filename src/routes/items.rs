@@ -40,7 +40,7 @@ pub async fn detail(State(st): State<AppState>, user: CurrentUser, headers: Head
         ).optional()?.ok_or(AppError::NotFound)?;
         let location = locations::path_text(c, detail.6)?;
         let tags = detail.7.clone();
-        let mut stmt = c.prepare_cached("SELECT id,name FROM user ORDER BY name COLLATE NOCASE")?;
+        let mut stmt = c.prepare_cached("SELECT id,name FROM user WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE")?;
         let people = stmt.query_map([], |r| Ok(Person { id: r.get(0)?, name: r.get(1)? }))?.collect::<Result<Vec<_>, _>>()?;
         let mut stmt = c.prepare_cached("SELECT id,name FROM location ORDER BY name COLLATE NOCASE")?;
         let destinations = stmt.query_map([], |r| Ok(Destination { id:r.get(0)?, name:r.get(1)? }))?.collect::<Result<Vec<_>,_>>()?;
@@ -145,7 +145,7 @@ pub async fn in_use(State(st): State<AppState>, user: CurrentUser) -> Result<Htm
             r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?)))?
             .collect::<Result<Vec<_>,_>>()?;
         let entries=raw.into_iter().map(|r| Ok(CheckoutRow { id:r.0,item_id:r.1,item:r.2,qty:r.3,unit:r.4,person:r.5,location:locations::path_text(c,r.6)? })).collect::<Result<Vec<_>,AppError>>()?;
-        let mut stmt=c.prepare_cached("SELECT id,name FROM user ORDER BY name COLLATE NOCASE")?;
+        let mut stmt=c.prepare_cached("SELECT id,name FROM user WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE")?;
         let people=stmt.query_map([],|r|Ok(Person{id:r.get(0)?,name:r.get(1)?}))?.collect::<Result<Vec<_>,_>>()?;
         let mut stmt=c.prepare_cached("SELECT id,name FROM location ORDER BY name COLLATE NOCASE")?;
         let destinations=stmt.query_map([],|r|Ok(Destination{id:r.get(0)?,name:r.get(1)?}))?.collect::<Result<Vec<_>,_>>()?;
@@ -163,6 +163,8 @@ pub async fn return_item(State(st): State<AppState>, _user: CurrentUser, Path(id
 pub struct ReassignForm { user_id:i64 }
 pub async fn reassign(State(st):State<AppState>,_user:CurrentUser,Path(id):Path<i64>,Form(f):Form<ReassignForm>)->Result<Redirect,AppError>{
     st.db.call(move|c|{
+        let active:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM user WHERE id=?1 AND deleted_at IS NULL)",[f.user_id],|r|r.get(0))?;
+        if !active{return Err(AppError::bad("Choose an active household member"));}
         if c.execute("UPDATE checkout SET user_id=?2 WHERE id=?1",params![id,f.user_id])?==0{return Err(AppError::NotFound);}
         Ok(())
     }).await?;

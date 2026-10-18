@@ -8,9 +8,26 @@
     <article class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3">
       <div class="min-w-0 flex-1"><h2 class="font-semibold">{{ member.name }}{% if member.id == user.id %} (you){% endif %}</h2><p class="text-sm text-ink-2 capitalize">{{ member.role }} · {% if member.checkouts == 0 %}Nothing checked out{% else %}{{ member.checkouts }} checked out{% endif %}</p>{% if member.must_change %}<p class="text-xs text-low">Temporary password</p>{% endif %}</div>
       {% if user.is_admin && member.id != user.id %}
-      <form method="post" action="/users/{{ member.id }}/reset"><button class="min-h-11 rounded-btn border border-line-strong px-3 text-sm font-semibold whitespace-nowrap">Reset password</button></form>
+      <form method="post" action="/users/{{ member.id }}/reset"><button class="min-h-11 rounded-btn border border-line-strong px-3 text-sm font-semibold whitespace-nowrap">Generate temporary password</button></form>
+      <details class="basis-full sm:basis-auto">
+        <summary class="min-h-11 cursor-pointer rounded-btn border border-line-strong px-3 py-2 text-sm font-semibold whitespace-nowrap">Set temporary password</summary>
+        <form method="post" action="/users/{{ member.id }}/password" class="mt-2 flex flex-wrap gap-2">
+          <input type="password" name="password" required minlength="12" maxlength="1024" autocomplete="new-password" placeholder="New password (12+ characters)" class="h-11 min-w-40 flex-1 rounded-btn border border-line-strong bg-bg px-3">
+          <input type="password" name="confirm_password" required minlength="12" maxlength="1024" autocomplete="new-password" placeholder="Confirm password" class="h-11 min-w-40 flex-1 rounded-btn border border-line-strong bg-bg px-3">
+          <button class="min-h-11 rounded-btn bg-accent px-3 text-sm font-semibold text-accent-fg whitespace-nowrap">Set and sign out</button>
+        </form>
+        <p class="mt-1 text-xs text-ink-3">They’ll need to choose a new password when they sign in.</p>
+      </details>
       <form method="post" action="/users/{{ member.id }}/role"><input type="hidden" name="role" value="{% if member.role == "admin" %}member{% else %}admin{% endif %}"><button class="min-h-11 rounded-btn border border-line-strong px-3 text-sm font-semibold whitespace-nowrap">Make {% if member.role == "admin" %}member{% else %}admin{% endif %}</button></form>
-      <form method="post" action="/users/{{ member.id }}/remove"><button class="min-h-11 px-3 text-sm font-semibold text-gone whitespace-nowrap">Remove</button></form>
+      {% endif %}
+      {% if user.is_admin && member.can_remove %}
+      <form method="post" action="/users/{{ member.id }}/remove" onsubmit="return confirm('{% if member.id == user.id %}Delete your admin account and sign out?{% else %}Remove this account from the household?{% endif %}{% if member.checkouts > 0 %} Return their checked-out items first.{% endif %}')">
+        <button class="min-h-11 px-3 text-sm font-semibold text-gone whitespace-nowrap">Remove{% if member.id == user.id %} my account{% endif %}</button>
+      </form>
+      {% else if user.is_admin && member.checkouts > 0 %}
+      <span class="text-xs text-ink-3">Return checked-out items before removal</span>
+      {% else if user.is_admin && member.role == "admin" %}
+      <span class="text-xs text-ink-3">Last admin can’t be removed</span>
       {% endif %}
     </article>
     {% endfor %}
@@ -20,7 +37,7 @@
     <form method="post" action="/users" class="mt-3 flex flex-wrap gap-2">
       <input name="name" required maxlength="60" placeholder="Name" class="h-12 min-w-40 flex-1 rounded-btn border border-line-strong bg-bg px-3 text-base">
       <select name="role" class="h-12 rounded-btn border border-line-strong bg-bg px-3 text-base"><option value="member">Member</option><option value="admin">Admin</option></select>
-      <button class="h-12 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Add member</button>
+      <button class="h-12 rounded-btn bg-accent px-4 font-semibold text-accent-fg whitespace-nowrap">Add user</button>
     </form>
   </section>
   {% else %}<p class="text-sm text-ink-2">Only admins can add, remove or reset members.</p>{% endif %}

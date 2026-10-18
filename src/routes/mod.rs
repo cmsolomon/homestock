@@ -1,5 +1,5 @@
 use crate::{activity, AppState};
-use axum::{extract::DefaultBodyLimit, middleware, response::Redirect, routing::{get, post}, Router};
+use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
 use tower_http::{compression::CompressionLayer, services::ServeDir};
 
 pub mod locations;
@@ -16,7 +16,7 @@ pub mod users;
 pub fn router(state: AppState) -> Router {
     let photos = ServeDir::new(state.cfg.data_dir.join("photos"));
     Router::new()
-        .route("/", get(|| async { Redirect::to("/loc") }))
+        .route("/", get(auth::home))
         .route("/login", get(auth::login_page).post(auth::login))
         .route("/setup", post(auth::setup))
         .route("/logout", post(auth::logout))
@@ -50,10 +50,12 @@ pub fn router(state: AppState) -> Router {
         .route("/export.csv", get(export::csv))
         .route("/account", get(account::page))
         .route("/account/password", post(account::change_password))
+        .route("/account/logout-everywhere", post(account::logout_everywhere))
         .route("/me/theme", post(account::theme))
         .route("/household", get(users::page))
         .route("/users", post(users::create))
         .route("/users/{id}/reset", post(users::reset))
+        .route("/users/{id}/password", post(users::change_password))
         .route("/users/{id}/role", post(users::role))
         .route("/users/{id}/remove", post(users::remove))
         .route("/checkouts/{id}/return", post(items::return_item))

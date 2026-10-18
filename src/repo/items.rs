@@ -108,6 +108,12 @@ pub fn move_item(c: &mut Connection, id: i64, to: i64, qty: Option<i64>) -> Resu
 }
 
 pub fn checkout(c: &Connection, item_id: i64, qty: i64, user_id: i64) -> Result<i64, AppError> {
+    let active: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM user WHERE id=?1 AND deleted_at IS NULL)",
+        [user_id],
+        |r| r.get(0),
+    )?;
+    if !active { return Err(AppError::bad("Choose an active household member")); }
     // The trigger `checkout_not_over_available` enforces the limit atomically.
     c.execute("INSERT INTO checkout(item_id, qty, user_id) VALUES (?1, ?2, ?3)", params![item_id, qty, user_id])?;
     Ok(c.last_insert_rowid())
@@ -194,6 +200,7 @@ mod tests {
     fn database() -> Connection {
         let c = Connection::open_in_memory().expect("open in-memory database");
         c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
+        c.execute_batch(include_str!("../../migrations/0002_soft_delete_users.sql")).expect("apply user soft-delete migration");
         c.execute("INSERT INTO user(name,role,password_hash) VALUES ('Jamie','admin','hash')", []).expect("insert user");
         c.execute("INSERT INTO location(name,kind) VALUES ('Garage','Room')", []).expect("insert source location");
         c.execute("INSERT INTO location(name,kind) VALUES ('Kitchen','Room')", []).expect("insert destination location");

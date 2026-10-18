@@ -33,7 +33,8 @@ homestock/
 ├── build.rs                    # optional: run tailwind CLI if present
 ├── config.example.toml
 ├── migrations/
-│   └── 0001_init.sql           # executed at startup (user_version gate)
+│   ├── 0001_init.sql           # executed at startup (user_version gate)
+│   └── 0002_soft_delete_users.sql # retains removed accounts and reserves names
 ├── styles/
 │   └── input.css               # Tailwind v4 @theme tokens (from README tokens)
 ├── static/                     # embedded or served from disk
@@ -123,8 +124,8 @@ The full SQL is in `starter/migrations/0001_init.sql`. Decisions:
 ## 7. Routes (server-rendered + HTMX partials)
 
 ```
-GET  /login  POST /login  POST /logout  GET/POST /setup (only when no users)
-GET  /                          → 302 /loc
+GET  /                          sign-in/setup when signed out; redirect to /loc or /account when signed in
+GET  /login  POST /login  POST /logout  POST /setup (only when no active users)
 GET  /loc                       root (rooms)
 GET  /loc/{id}?scope=level|nested
 GET  /loc/{id}/contents?scope=  partial: #contents (scope toggle uses hx-get + hx-push-url)
@@ -149,9 +150,9 @@ POST /shopping {name}  POST /shopping/{id}/toggle  POST /shopping/{id}/restock {
 DELETE /shopping/{id}  (Not buying)   POST /shopping/from-item/{item_id}   POST /shopping/low/all
 GET  /shopping/share.txt        plain text for Web Share / Copy / mailto
 GET  /search  GET /search/results?q=&tag=&status=
-GET  /export.csv
+GET  /export.csv[?location_id={id}]  (all inventory or selected location subtree)
 GET  /household  POST /users  POST /users/{id}/reset  POST /users/{id}/role  DELETE /users/{id}   (admin)
-GET  /account  POST /account/password  POST /me/theme {light|dark|system}
+GET  /account  POST /account/password  POST /account/logout-everywhere  POST /me/theme {light|dark|system}
 GET  /photos/*  (ServeDir, Cache-Control: immutable)   GET /static/*
 ```
 HTMX conventions:

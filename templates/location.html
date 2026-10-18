@@ -20,6 +20,7 @@
       <div id="location-meta" class="mt-1 text-[13px] text-ink-2">{{ meta }}</div>
     </div>
     <div class="flex flex-wrap gap-2">
+      <a href="/export.csv?location_id={{ loc_id }}" class="h-11 px-4 rounded-btn border border-line-strong bg-surface font-medium grid place-items-center whitespace-nowrap">Export this location CSV</a>
       <button hx-get="/loc/{{ loc_id }}/quick-add?scope={% if nested %}nested{% else %}level{% endif %}" hx-target="#sheet"
               class="h-11 px-4.5 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap">+ Add item</button>
       <button hx-get="/loc/{{ loc_id }}/new-box" hx-target="#sheet"
