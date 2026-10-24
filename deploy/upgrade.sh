@@ -9,7 +9,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 docker compose version >/dev/null
 
-for file in homestock-image.tar config.toml .env docker-compose.yml; do
+for file in config.toml .env docker-compose.yml; do
   if [[ ! -f "$file" ]]; then
     echo "Refusing upgrade: required existing installation file is missing: $file" >&2
     exit 1
@@ -43,7 +43,11 @@ if [[ ! -f "$DATA_DIR/$DATABASE_RELATIVE_PATH" ]]; then
   exit 1
 fi
 
-docker load --input homestock-image.tar
+if [[ -f homestock-image.tar ]]; then
+  docker load --input homestock-image.tar
+else
+  docker compose pull
+fi
 docker compose up -d --no-build
 
 echo "Homestock upgraded. The existing config and Compose bind-mounted data were left in place."

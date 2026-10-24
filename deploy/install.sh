@@ -9,7 +9,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 docker compose version >/dev/null
 
-for file in homestock-image.tar config.example.toml docker-compose.yml; do
+for file in config.example.toml docker-compose.yml; do
   if [[ ! -f "$file" ]]; then
     echo "Release file is missing: $file" >&2
     exit 1
@@ -25,7 +25,11 @@ if [[ ! -e .env ]]; then
 fi
 
 mkdir -p data backups
-docker load --input homestock-image.tar
+if [[ -f homestock-image.tar ]]; then
+  docker load --input homestock-image.tar
+else
+  docker compose pull
+fi
 docker compose up -d --no-build
 
 echo "Homestock is running on 127.0.0.1:8080. Persistent data is in the configured data directory."

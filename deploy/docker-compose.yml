@@ -1,6 +1,6 @@
 services:
   homestock:
-    image: homestock:release
+    image: "${HOMESTOCK_IMAGE:-homestock:release}"
     container_name: homestock
     restart: unless-stopped
     init: true

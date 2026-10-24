@@ -6,6 +6,12 @@ Homestock runs as an offline Docker image. Build a release on a machine with Doc
 ./release.sh 0.2.0
 ```
 
+## Publish to GitHub Container Registry
+
+The `Publish container` GitHub Actions workflow builds the Docker image and pushes it to `ghcr.io/<owner>/<repository>` when a GitHub release is published. It publishes version tags (for example `1.2.3`, `1.2`, and `1`) and a commit-SHA tag. To publish, create and publish a GitHub release with a semantic version tag such as `v1.2.3`; the workflow uses the repository's `GITHUB_TOKEN`, so no registry secret is needed. A manual workflow run is also available and publishes the commit-SHA tag.
+
+To use the published image from the Proxmox LXC, set `HOMESTOCK_IMAGE=ghcr.io/<owner>/<repository>:<version>` in `.env`; install and upgrade will pull it when `homestock-image.tar` is absent. Set the package visibility to public in GitHub's package settings for unauthenticated pulls; for a private package, log Docker in to `ghcr.io` in the LXC with a token that has `read:packages`. Leave the default `homestock:release` value to use the offline image tarball in a release bundle.
+
 Prepare a Debian-based LXC with Docker Engine and the Docker Compose plugin installed. If it is unprivileged, enable Proxmox `nesting` (and `keyctl` if required by the Docker runtime). Transfer `dist/homestock-0.2.0.tar.gz` into the LXC and extract it into a dedicated deployment directory. On the LXC:
 
 ```sh
