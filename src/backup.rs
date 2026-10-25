@@ -1,7 +1,8 @@
-//! Idle-aware online backup to a CIFS-mounted NAS.
+//! Idle-aware online backup to an SMB-mounted NAS.
 //!
 //! - Dirty detection: `PRAGMA data_version` on our own long-lived connection changes
-//!   whenever the app's connection commits. No bookkeeping in handlers.
+//!   whenever the app's connection commits. The initial value is a clean baseline, so
+//!   startup alone does not trigger a backup. No bookkeeping in handlers.
 //! - Idle detection: `Activity` (updated by middleware on every request).
 //! - Safety: only runs if `<backup directory>/<sentinel>` exists, so an unmounted share
 //!   (an empty local mount point) never fills the container disk.
@@ -23,7 +24,8 @@ pub struct Backupper {
 impl Backupper {
     pub fn new(cfg: BackupConfig, db_path: PathBuf, data_dir: PathBuf) -> rusqlite::Result<Self> {
         let conn = Connection::open(&db_path)?;
-        Ok(Self { cfg, db_path, data_dir, conn, last_version: None, last_backup: 0 })
+        let last_version = conn.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+        Ok(Self { cfg, db_path, data_dir, conn, last_version: Some(last_version), last_backup: 0 })
     }
 
     fn dirty(&mut self) -> rusqlite::Result<bool> {
@@ -121,6 +123,57 @@ impl Backupper {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Backupper;
+    use crate::config::BackupConfig;
+    use rusqlite::Connection;
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    fn test_directory() -> std::path::PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let dir = std::env::temp_dir().join(format!("homestock-backup-test-{suffix}"));
+        fs::create_dir_all(&dir).expect("create test directory");
+        dir
+    }
+
+    fn test_config(directory: String) -> BackupConfig {
+        BackupConfig {
+            directory,
+            sentinel: ".homestock-nas".into(),
+            idle_secs: 300,
+            min_interval_secs: 1800,
+            max_interval_secs: 86400,
+            keep: 48,
+            stage_locally: true,
+            sync_photos: true,
+        }
+    }
+
+    #[test]
+    fn clean_start_is_not_dirty_but_external_commit_is() {
+        let dir = test_directory();
+        let db_path = dir.join("homestock.sqlite3");
+        let other_connection = Connection::open(&db_path).expect("open database");
+        other_connection.execute_batch("CREATE TABLE sample (value INTEGER);").expect("create table");
+
+        let mut backupper = Backupper::new(
+            test_config(dir.join("backups").to_string_lossy().into_owned()),
+            db_path,
+            dir.clone(),
+        ).expect("create backupper");
+
+        assert!(!backupper.dirty().expect("check initial database version"));
+
+        other_connection.execute("INSERT INTO sample(value) VALUES (1)", []).expect("commit change");
+        assert!(backupper.dirty().expect("detect external database change"));
+
+        drop(backupper);
+        drop(other_connection);
+        fs::remove_dir_all(dir).expect("remove test directory");
     }
 }
 

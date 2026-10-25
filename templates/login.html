@@ -11,7 +11,7 @@
     <header class="text-center">
       <span class="mx-auto mb-4 grid size-14 place-items-center rounded-2xl bg-accent text-accent-fg text-2xl font-bold">H</span>
       <h1 class="text-2xl font-bold">{% if first_run %}Set up Homestock{% else %}Sign in to Homestock{% endif %}</h1>
-      <p class="mt-1 text-ink-2">Our home · homestock.local</p>
+      <p class="mt-1 text-ink-2">Our home</p>
     </header>
     {% if let Some(message) = error %}<p role="alert" class="rounded-xl bg-gone-soft p-3 text-gone">{{ message }}</p>{% endif %}
     {% if first_run %}
