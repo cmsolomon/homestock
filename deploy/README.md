@@ -1,18 +1,42 @@
-# Homestock Docker release
+# Deployment files and releases
 
-Homestock runs as an offline Docker image published to GitHub Container Registry for `linux/amd64` and `linux/arm64`.
+This folder is what a release ships to servers. To install Homestock, follow the
+[Quickstart](../docs/QUICKSTART.md); this page is for people working on the project.
 
-For a full Proxmox VE 9 setup guide covering an unprivileged LXC, Docker Compose, an SMB share mounted inside the LXC with rclone, permissions, HTTPS, backups, and upgrades, see [PROXMOX-LXC.md](./PROXMOX-LXC.md).
+| File | Installed as | Purpose |
+|---|---|---|
+| `install.sh` | `/usr/local/bin/homestock-upgrade` | The bootstrap: verifies a release with cosign and runs its installer. The installed copy has the install directory and repository filled in, and adds `--check`. |
+| `homestock-installer.sh` | (run from the bundle) | Installs, re-applies or upgrades, with automatic rollback. |
+| `homestock-admin.sh` | `/usr/local/bin/homestock-admin` | Account recovery inside the container. |
+| `homestock-nas.sh` | `/usr/local/bin/homestock-nas` | Sets up and confirms the NAS copy, and writes its systemd units. |
+| `homestock-doctor.sh` | `/usr/local/bin/homestock-doctor` | Health checks. |
+| `sync-homestock-backups.sh` | `<install-dir>/` | Run by the sync timer as UID 10001. |
+| `docker-compose.yml` | `<install-dir>/` | The container: read-only, no capabilities, UID 10001. |
+| `config.example.toml` | `<install-dir>/` | Every `config.toml` setting, with comments. |
 
 ## Releases
 
-Publishing a GitHub release with a semantic version tag such as `v1.2.3` runs the `Release` workflow (`.github/workflows/release.yml`). It:
+Publishing a GitHub release with a semantic version tag such as `v1.2.3` runs the `Release`
+workflow (`.github/workflows/release.yml`). It:
 
-- builds the image natively for amd64 and arm64 and pushes one multi-arch image to `ghcr.io/<owner>/<repository>`, tagged `1.2.3`, `1.2`, `1` and with the commit SHA;
-- signs the image with keyless cosign (Sigstore, using the workflow's GitHub identity; no keys to manage);
-- attaches signed install files to the release: `homestock-deploy-1.2.3.tar.gz` (this directory plus `release.env`, which pins the image by digest), the `install.sh` bootstrap, `SHA256SUMS`, and a `.sigstore.json` signature bundle for each.
+- builds the image natively for amd64 and arm64 and pushes one multi-arch image to
+  `ghcr.io/<owner>/<repository>`, tagged `1.2.3`, `1.2`, `1` and with the commit SHA;
+- signs the image with keyless cosign (Sigstore, using the workflow's GitHub identity, so there
+  are no keys to manage);
+- attaches the signed install files to the release:
+  - `homestock-deploy-1.2.3.tar.gz`: this folder, plus `release.env`, which pins the image by
+    digest;
+  - the `install.sh` bootstrap;
+  - `SHA256SUMS`;
+  - a `.sigstore.json` signature bundle for each of these.
 
-The workflow uses the repository's `GITHUB_TOKEN`; no secrets are needed. Make the GHCR package public in GitHub's package settings so installs can pull without logging in. A manual workflow run publishes and signs a commit-SHA image tag only. To build the install files locally, run `scripts/package-release.sh VERSION IMAGE@sha256:DIGEST OUTDIR`.
+The installer verifies against the workflow's identity at the release tag, so keep the
+workflow's path stable.
+
+The workflow uses the repository's `GITHUB_TOKEN`, so no secrets are needed. Make the GHCR
+package public in GitHub's package settings so installs can pull without logging in. A manual
+workflow run publishes and signs a commit-SHA image tag only. To build the install files
+locally, run `scripts/package-release.sh VERSION IMAGE@sha256:DIGEST OUTDIR`.
 
 To verify an image by hand:
 
@@ -22,36 +46,14 @@ cosign verify ghcr.io/<owner>/<repository>:1.2.3 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-To use the published image, set `HOMESTOCK_IMAGE=ghcr.io/<owner>/<repository>:<version>` in `.env`.
+## Testing the installer without a release
 
-Prepare a Debian-based LXC with Docker Engine and the Docker Compose plugin installed. If it is unprivileged, enable Proxmox `nesting` and `keyctl` for Docker; enable `fuse` as well if mounting an SMB share inside the LXC with rclone. Transfer `dist/homestock-0.2.0.tar.gz` into the LXC and extract it into `/opt/homestock` (the per-app backup timer uses this path). On the LXC:
-
-```sh
-mkdir -p /opt/homestock
-tar -xzf homestock-0.2.0.tar.gz -C /opt/homestock
-cd /opt/homestock
-```
-
-## First install
-
-1. Review `config.example.toml` and `.env`; `./install.sh` creates `config.toml` from the example if needed.
-2. Ensure the data and certificate directories in `.env` exist; the data directory must be writable by the configured `HOMESTOCK_UID` and `HOMESTOCK_GID` (default `10001`). Put `cert.pem` and `key.pem` in the cert directory and make the private key readable by that UID.
-3. Run `./install.sh` as root. It installs the app, enables Docker's normal boot-time restart behavior, and installs the per-app backup sync timer.
-4. Homestock serves HTTPS directly on port `8443`; keep `cookie_secure = true`.
-5. Create the initial household admin through the setup page.
-
-`config.toml` sets the in-container SQLite `database_path` and backup timing. Keep the database path at `/var/lib/homestock/homestock.sqlite3` unless you also change the Compose data mount. The LXC source paths are set separately in `.env`; `HOMESTOCK_DATA_DIR` contains the database, photos, and pending local backups. Homestock starts normally even when the NAS is unavailable.
-
-The sync timer only uploads pending backups when `.homestock-nas` exists under the configured backup directory. For a local backup folder, create the marker after installation:
+Run the installer straight from a checkout, with a locally built image:
 
 ```sh
-touch backups/.homestock-nas
+docker build -t homestock:dev .
+sudo bash deploy/homestock-installer.sh --image homestock:dev --install-dir /tmp/hs/opt \
+  --data-dir /tmp/hs/data --certs-dir /tmp/hs/certs
 ```
 
-For an SMB/NAS backup destination, mount the share inside the LXC with rclone at `/mnt/homestock-backups`. Set `HOMESTOCK_BACKUP_DIR` to that path and `HOMESTOCK_BACKUP_REQUIRE_MOUNT=true` in `.env`; ensure the mount is writable by UID/GID `10001`. Create `.homestock-nas` on the mounted share itself, never in the empty local mount-point directory. A per-app systemd timer checks the mount and marker every five minutes and syncs pending backups/photos when available. Docker and Homestock start independently at boot.
-
-## Upgrade
-
-Extract the new release over the existing deployment directory, then run `./upgrade.sh`. The archive does not contain `config.toml`, `.env`, certificates, or application data, so those remain untouched. For an existing installation, update `config.toml` to bind `0.0.0.0:8443` and set `tls_cert`/`tls_key` to the mounted certificate paths; add `HOMESTOCK_CERT_DIR` to `.env` and place the PEM files there before restarting. Before replacing the container, the script verifies that the configured data directory and database file exist and that the database path is within its persistent mount. It then loads the new image and recreates the service using the existing bind mounts. It does not remove Docker volumes or data. Keep `HOMESTOCK_DATA_DIR` and `database_path` unchanged to continue using the existing database.
-
-The schema version is stored in SQLite's `PRAGMA user_version` (currently version 2). If startup detects pending migrations, it makes an online SQLite backup next to the database and verifies it before changing the schema. Backup failure prevents the migration and app startup. New databases are initialized without this extra backup. Keep an independent backup before upgrades as well; the migration backup is a rollback safeguard, not a substitute for a verified recovery copy.
+Signature checks are skipped, with a warning, when `--image` is given.
