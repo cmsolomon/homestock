@@ -23,7 +23,7 @@ fn scope_preference(scope: Option<&str>, saved: Option<&str>) -> bool {
     match scope {
         Some("nested") => true,
         Some("level") => false,
-        _ => saved.map_or(true, |value| value == "nested"),
+        _ => saved.is_none_or(|value| value == "nested"),
     }
 }
 

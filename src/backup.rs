@@ -106,6 +106,25 @@ impl Backupper {
     }
 }
 
+/// Spawned from main. Wakes once a minute; nearly free when idle.
+pub async fn run_loop(mut b: Backupper, activity: Arc<Activity>, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+    let mut iv = tokio::time::interval(Duration::from_secs(60));
+    iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = iv.tick() => {
+                let a = activity.clone();
+                b = tokio::task::spawn_blocking(move || { b.tick(&a, false); b }).await.expect("backup task panicked");
+            }
+            _ = shutdown.changed() => {
+                let a = activity.clone();
+                let _ = tokio::task::spawn_blocking(move || b.tick(&a, true)).await;
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Backupper;
@@ -208,24 +227,5 @@ mod tests {
 
         drop(backupper);
         fs::remove_dir_all(dir).expect("remove test directory");
-    }
-}
-
-/// Spawned from main. Wakes once a minute; nearly free when idle.
-pub async fn run_loop(mut b: Backupper, activity: Arc<Activity>, mut shutdown: tokio::sync::watch::Receiver<bool>) {
-    let mut iv = tokio::time::interval(Duration::from_secs(60));
-    iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        tokio::select! {
-            _ = iv.tick() => {
-                let a = activity.clone();
-                b = tokio::task::spawn_blocking(move || { b.tick(&a, false); b }).await.expect("backup task panicked");
-            }
-            _ = shutdown.changed() => {
-                let a = activity.clone();
-                let _ = tokio::task::spawn_blocking(move || b.tick(&a, true)).await;
-                break;
-            }
-        }
     }
 }
