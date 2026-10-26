@@ -18,7 +18,7 @@ Core capabilities:
 The files in `design/` are **design references built in HTML** — a working prototype that shows the intended look and behaviour. They are **not production code to copy**. Recreate them in the target stack using its normal patterns. If no codebase exists yet, a good fit is:
 
 - **Decided stack (owner):** Rust · Axum + Tokio · SQLite (WAL) · server-rendered Askama templates + **HTMX** · Tailwind v4 (build-time CLI) · **fully offline: no CDN or external requests at runtime** · packaged as a Docker image for a Proxmox LXC, with persistent database storage and idle-time backups to a configured directory.
-- **See `IMPLEMENTATION.md`** for architecture, directory layout, routes, backup design and deployment, and `starter/` for the schema SQL and reference Rust/HTMX code (not compiled — a starting shape).
+- **See `IMPLEMENTATION.md`** for architecture, directory layout, routes, backup design and deployment. The implementation is at the repository root (schema SQL in `migrations/`).
 - “Optimistic UI” below means: HTMX swaps the server's fragment immediately. There is no client-side store.
 
 How to open the references: put the `design/` folder anywhere and open `Home Inventory UX Concept.dc.html` in a browser (keep `support.js` next to it). The concept doc embeds live instances of the prototype. `Home Inventory Prototype.dc.html` is the full clickable app (demo password: `homestock`). Data is in-memory seed data and resets on reload.
@@ -49,7 +49,7 @@ Global: Quick add (+), Search (`/` key on desktop), Export CSV, Theme toggle, Ac
 ## Data model
 
 ```
-Authoritative SQL: starter/migrations/0001_init.sql. Summary:
+Authoritative SQL: migrations/ (0001_init.sql onward). Summary:
 location  id, name, kind, parent_id NULL, photo, created_at          (adjacency list + recursive CTE)
 item      id, name, notes NULL, location_id, qty ≥0, unit 'pcs', min_qty 0, photo, created_at, updated_at
 tag / item_tag                                                       (many-to-many)
@@ -259,5 +259,4 @@ No bitmap or icon assets. All glyphs are text characters (+ − × › ▶ ▼ �
 - `design/Home Inventory Prototype.dc.html` — full clickable prototype. Logic (state transitions, quantity rules, fuzzy search, CSV, share text) is in the `<script data-dc-script>` class at the bottom. Read it as the behavioural spec.
 - `design/support.js` — runtime needed only to open the two files above. It loads React from the internet, so the design references need a connection to open. Not part of the app, and not a pattern to copy.
 - `IMPLEMENTATION.md` — Rust/Axum/HTMX architecture, routes, backups, LXC/CIFS deployment, build order.
-- `starter/` — `Cargo.toml`, `config.example.toml`, `migrations/0001_init.sql`, `src/` (db, auth, repo, search, backup, photos, routes), `templates/` (base, location, contents, item card, quick add, session row), `static/app.js`, `styles/input.css`.
-- `.github/copilot-instructions.md` — condensed rules for GitHub Copilot; copy it into the repo root.
+- `../.github/copilot-instructions.md` — condensed rules for GitHub Copilot.

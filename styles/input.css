@@ -1,6 +1,9 @@
-/* Build: tailwindcss -i styles/input.css -o static/app.css --minify   (standalone CLI, no Node) */
-@import "tailwindcss";
+/* Build: scripts/build-css.sh → static/app.css (generated, not committed). */
+/* Sources are explicit so docs and design files elsewhere in the repo can't add classes. */
+@import "tailwindcss" source(none);
 @source "../templates";
+@source "../static/app.js";
+@source "../src";
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 :root {

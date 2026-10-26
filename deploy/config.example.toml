@@ -6,6 +6,12 @@ database_path = "/var/lib/homestock/homestock.sqlite3"
 session_days = 30
 cookie_secure = true
 
+# Reverse proxies whose X-Forwarded-For header is trusted for the client address, e.g. HAProxy
+# on OPNsense doing TLS offloading (enable its X-Forwarded-For option). Without this, every
+# request behind the proxy shares one wrong-password limit. List only proxy addresses, and
+# firewall the app port so clients can reach it only through them.
+# trusted_proxies = ["10.0.10.1"]
+
 [backup]
 idle_secs = 300
 min_interval_secs = 1800
