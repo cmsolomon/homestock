@@ -41,7 +41,9 @@ impl Config {
         let mut args = std::env::args().skip(1);
         let mut path = PathBuf::from("config.toml");
         while let Some(a) = args.next() { if a == "--config" { if let Some(p) = args.next() { path = p.into(); } } }
-        Ok(toml::from_str(&std::fs::read_to_string(&path)?)?)
+        let cfg: Self = toml::from_str(&std::fs::read_to_string(&path)?)?;
+        if cfg.session_days < 1 { return Err("session_days must be at least 1".into()); }
+        Ok(cfg)
     }
 }
 

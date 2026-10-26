@@ -183,10 +183,27 @@ fn remove_open_item(c: &rusqlite::Connection, id: i64) -> Result<(StockRow, usiz
     Ok((row, buy_count))
 }
 
-fn toggle_purchase(c: &rusqlite::Connection, id: i64) -> Result<(), AppError> {
-    if c.execute("UPDATE shop SET bought_at=CASE WHEN bought_at IS NULL THEN unixepoch() ELSE NULL END WHERE id=?1", [id])? == 0 {
-        return Err(AppError::NotFound);
+/// Tick (To buy → Bought) or un-tick. Un-ticking an item that is already back on the list
+/// (e.g. used up again meanwhile) folds into that open entry, keeping the larger quantity,
+/// because each item has at most one open entry.
+fn toggle_purchase(c: &mut rusqlite::Connection, id: i64) -> Result<(), AppError> {
+    let tx = c.transaction()?;
+    let (item_id, qty, bought): (Option<i64>, i64, bool) = tx.query_row(
+        "SELECT item_id,qty,bought_at IS NOT NULL FROM shop WHERE id=?1", [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).optional()?.ok_or(AppError::NotFound)?;
+    let open: Option<i64> = match item_id {
+        Some(item_id) if bought => tx.query_row(
+            "SELECT id FROM shop WHERE item_id=?1 AND bought_at IS NULL", [item_id], |r| r.get(0)).optional()?,
+        _ => None,
+    };
+    if let Some(open) = open {
+        tx.execute("UPDATE shop SET qty=MAX(qty,?2) WHERE id=?1", params![open, qty])?;
+        tx.execute("DELETE FROM shop WHERE id=?1", [id])?;
+    } else {
+        tx.execute("UPDATE shop SET bought_at=CASE WHEN bought_at IS NULL THEN unixepoch() ELSE NULL END WHERE id=?1", [id])?;
     }
+    tx.commit()?;
     Ok(())
 }
 
@@ -293,9 +310,27 @@ mod tests {
         c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
         c.execute("INSERT INTO shop(name,bought_at) VALUES ('Coffee',unixepoch())", []).expect("insert bought item");
         let id = c.last_insert_rowid();
+        let mut c = c;
 
-        toggle_purchase(&c, id).expect("move to unbought");
+        toggle_purchase(&mut c, id).expect("move to unbought");
         let bought: bool = c.query_row("SELECT bought_at IS NOT NULL FROM shop WHERE id=?1", [id], |r| r.get(0)).expect("read state");
         assert!(!bought);
+    }
+
+    #[test]
+    fn unticking_an_item_already_back_on_the_list_folds_into_the_open_entry() {
+        let mut c = Connection::open_in_memory().expect("open in-memory database");
+        c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
+        c.execute("INSERT INTO location(name,kind) VALUES ('Kitchen','Room')", []).expect("insert room");
+        c.execute("INSERT INTO item(name,location_id,qty) VALUES ('Coffee',1,0)", []).expect("insert item");
+        c.execute("INSERT INTO shop(name,item_id,qty,bought_at) VALUES ('Coffee',1,3,unixepoch())", []).expect("bought entry");
+        let bought = c.last_insert_rowid();
+        c.execute("INSERT INTO shop(name,item_id,qty) VALUES ('Coffee',1,2)", []).expect("new open entry");
+
+        toggle_purchase(&mut c, bought).expect("untick bought entry");
+
+        let rows: Vec<(i64, bool)> = c.prepare("SELECT qty,bought_at IS NOT NULL FROM shop").expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).expect("query").collect::<Result<_, _>>().expect("collect");
+        assert_eq!(rows, vec![(3, false)]);
     }
 }

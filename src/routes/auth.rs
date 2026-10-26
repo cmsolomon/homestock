@@ -6,7 +6,6 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::CookieJar;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
@@ -35,7 +34,8 @@ pub async fn login_page(State(st): State<AppState>) -> Result<Html<String>, AppE
 pub async fn home(State(st): State<AppState>, jar: CookieJar) -> Result<Response, AppError> {
     if let Some(cookie) = jar.get(COOKIE) {
         let token = cookie.value().to_owned();
-        if let Some(user) = st.db.call(move |c| auth::lookup_session(c, &token)).await? {
+        let days = st.cfg.session_days;
+        if let Some(user) = st.db.call(move |c| auth::lookup_session(c, &token, days)).await? {
             return Ok(Redirect::to(if user.must_change_pw { "/account" } else { "/loc" }).into_response());
         }
     }
@@ -68,20 +68,14 @@ pub async fn login(State(st): State<AppState>, Form(f): Form<Credentials>) -> Re
         return Ok(page(&st, Some("That password doesn’t match. Try again or ask an admin to reset it.".into())).await?.into_response());
     }
 
-    let mut token = [0u8; 32];
-    rand::fill(&mut token);
-    let token = URL_SAFE_NO_PAD.encode(token);
-    let token_for_db = token.clone();
     let days = st.cfg.session_days;
-    let must_change = st.db.call(move |c| {
-        c.execute(
-            "INSERT INTO session(token, user_id, expires_at) VALUES (?1, ?2, unixepoch() + ?3 * 86400)",
-            params![token_for_db, user_id, days],
-        )?;
-        c.query_row("SELECT must_change_pw FROM user WHERE id = ?1 AND deleted_at IS NULL", [user_id], |row| row.get::<_, bool>(0)).map_err(Into::into)
+    let (token, must_change) = st.db.call(move |c| {
+        let token = auth::create_session(c, user_id, days)?;
+        let must_change = c.query_row("SELECT must_change_pw FROM user WHERE id = ?1 AND deleted_at IS NULL", [user_id], |row| row.get::<_, bool>(0))?;
+        Ok((token, must_change))
     }).await?;
     let mut response = Redirect::to(if must_change { "/account" } else { "/loc" }).into_response();
-    let cookie = session_cookie(&token, days, st.cfg.cookie_secure);
+    let cookie = session_cookie(&token, st.cfg.cookie_secure);
     response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).map_err(|e| AppError::internal(e.to_string()))?);
     Ok(response)
 }
@@ -116,16 +110,9 @@ pub async fn setup(State(st): State<AppState>, Form(f): Form<SetupForm>) -> Resu
         Ok(id)
     }).await?;
     let mut response = Redirect::to("/loc").into_response();
-    let mut token = [0u8; 32];
-    rand::fill(&mut token);
-    let token = URL_SAFE_NO_PAD.encode(token);
-    let token_db = token.clone();
     let days = st.cfg.session_days;
-    st.db.call(move |c| {
-        c.execute("INSERT INTO session(token, user_id, expires_at) VALUES (?1, ?2, unixepoch() + ?3 * 86400)", params![token_db, user_id, days])?;
-        Ok(())
-    }).await?;
-    let cookie = session_cookie(&token, days, st.cfg.cookie_secure);
+    let token = st.db.call(move |c| auth::create_session(c, user_id, days)).await?;
+    let cookie = session_cookie(&token, st.cfg.cookie_secure);
     response.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_str(&cookie).map_err(|e| AppError::internal(e.to_string()))?);
     Ok(response)
 }
@@ -148,9 +135,12 @@ pub async fn logout(State(st): State<AppState>, headers: HeaderMap) -> Result<Re
     Ok(response)
 }
 
-fn session_cookie(token: &str, days: i64, secure: bool) -> String {
+/// The server-side sliding expiry (`session_days`) decides how long a session lives; the
+/// cookie only carries the token, so it uses the longest lifetime browsers accept (400 days)
+/// and an active user is never signed out by a cookie set once at login.
+fn session_cookie(token: &str, secure: bool) -> String {
     let secure = if secure { "; Secure" } else { "" };
-    format!("{COOKIE}={token}; HttpOnly; SameSite=Lax{secure}; Path=/; Max-Age={}", days * 86400)
+    format!("{COOKIE}={token}; HttpOnly; SameSite=Lax{secure}; Path=/; Max-Age={}", 400 * 86400)
 }
 
 #[cfg(test)]
@@ -159,7 +149,7 @@ mod tests {
 
     #[test]
     fn secure_cookie_flag_follows_config() {
-        assert!(session_cookie("token",30,true).contains("; Secure;"));
-        assert!(!session_cookie("token",30,false).contains("; Secure;"));
+        assert!(session_cookie("token",true).contains("; Secure;"));
+        assert!(!session_cookie("token",false).contains("; Secure;"));
     }
 }

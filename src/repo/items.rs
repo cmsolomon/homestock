@@ -67,13 +67,33 @@ pub fn set_tags(c: &Connection, item_id: i64, tags: &[String]) -> Result<(), App
     Ok(())
 }
 
-/// Same-name, same-unit item at `to` gets `n` added; otherwise a copy of `src` is created there.
-fn add_or_merge(c: &Connection, src: i64, to: i64, n: i64) -> Result<i64, AppError> {
-    let existing: Option<i64> = c.query_row(
+/// A same-name (case-insensitive), same-unit item at `to`, other than `src` itself.
+fn same_item_at(c: &Connection, src: i64, to: i64) -> Result<Option<i64>, AppError> {
+    Ok(c.query_row(
         "SELECT d.id FROM item d JOIN item s ON s.id = ?1
          WHERE d.location_id = ?2 AND d.id <> s.id AND d.name = s.name COLLATE NOCASE AND d.unit = s.unit",
-        params![src, to], |r| r.get(0)).optional()?;
-    if let Some(id) = existing {
+        params![src, to], |r| r.get(0)).optional()?)
+}
+
+/// Move the whole record (no checkouts left on it) to `to`. If `to` already holds the same
+/// item, fold this record into it: its qty and tags carry over, shopping entries follow
+/// (an open entry yields to the destination's own), and this record is removed.
+fn relocate(c: &Connection, id: i64, to: i64) -> Result<i64, AppError> {
+    let Some(dest) = same_item_at(c, id, to)? else {
+        c.execute("UPDATE item SET location_id = ?2, updated_at = unixepoch() WHERE id = ?1", params![id, to])?;
+        return Ok(id);
+    };
+    c.execute("UPDATE item SET qty = qty + (SELECT qty FROM item WHERE id = ?1), updated_at = unixepoch() WHERE id = ?2", params![id, dest])?;
+    c.execute("INSERT OR IGNORE INTO item_tag(item_id, tag_id) SELECT ?2, tag_id FROM item_tag WHERE item_id = ?1", params![id, dest])?;
+    c.execute("UPDATE OR IGNORE shop SET item_id = ?2 WHERE item_id = ?1", params![id, dest])?;
+    c.execute("DELETE FROM shop WHERE item_id = ?1", [id])?;
+    c.execute("DELETE FROM item WHERE id = ?1", [id])?;
+    Ok(dest)
+}
+
+/// Same-name, same-unit item at `to` gets `n` added; otherwise a copy of `src` is created there.
+fn add_or_merge(c: &Connection, src: i64, to: i64, n: i64) -> Result<i64, AppError> {
+    if let Some(id) = same_item_at(c, src, to)? {
         c.execute("UPDATE item SET qty = qty + ?2, updated_at = unixepoch() WHERE id = ?1", params![id, n])?;
         return Ok(id);
     }
@@ -95,8 +115,7 @@ pub fn move_item(c: &mut Connection, id: i64, to: i64, qty: Option<i64>) -> Resu
     if from == to { return Err(AppError::conflict("It’s already there")); }
     let n = qty.unwrap_or(cur);
     let moved_id = if n >= cur && in_use == 0 {
-        tx.execute("UPDATE item SET location_id = ?2, updated_at = unixepoch() WHERE id = ?1", params![id, to])?;
-        id
+        relocate(&tx, id, to)?
     } else {
         if n < 1 || n > cur - in_use { return Err(AppError::bad(format!("Only {} available to move", cur - in_use))); }
         tx.execute("UPDATE item SET qty = qty - ?2, updated_at = unixepoch() WHERE id = ?1", params![id, n])?;
@@ -138,8 +157,7 @@ pub fn put_away(c: &mut Connection, checkout_id: i64, to: i64) -> Result<i64, Ap
         return Ok(item_id);
     }
     let dest = if qty == n && in_use == n {
-        tx.execute("UPDATE item SET location_id = ?2, updated_at = unixepoch() WHERE id = ?1", params![item_id, to])?;
-        item_id
+        relocate(&tx, item_id, to)?
     } else {
         tx.execute("UPDATE item SET qty = qty - ?2, updated_at = unixepoch() WHERE id = ?1", params![item_id, n])?;
         add_or_merge(&tx, item_id, to, n)?
@@ -230,6 +248,55 @@ mod tests {
                 .collect::<Result<_,_>>().expect("collect rows")
         };
         assert_eq!(rows, vec![(1,6),(2,2)]);
+    }
+
+    fn add_kitchen_batteries(c: &Connection, qty: i64) {
+        c.execute("INSERT INTO item(name,location_id,qty,unit) VALUES ('batteries',2,?1,'pcs')", [qty]).expect("insert destination item");
+    }
+
+    fn items(c: &Connection) -> Vec<(i64, i64, i64)> {
+        let mut stmt = c.prepare("SELECT id,location_id,qty FROM item ORDER BY id").expect("prepare rows");
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).expect("query rows")
+            .collect::<Result<_, _>>().expect("collect rows")
+    }
+
+    #[test]
+    fn moving_a_whole_item_merges_into_a_same_name_item() {
+        let mut c = database();
+        add_kitchen_batteries(&c, 3);
+        set_tags(&c, 1, &["aa".into()]).expect("tag source");
+        c.execute("INSERT INTO shop(name,item_id,qty,bought_at) VALUES ('Batteries',1,4,unixepoch())", []).expect("bought entry");
+        c.execute("INSERT INTO shop(name,item_id,qty) VALUES ('Batteries',1,2)", []).expect("open entry on source");
+        c.execute("INSERT INTO shop(name,item_id,qty) VALUES ('batteries',2,1)", []).expect("open entry on destination");
+
+        assert_eq!(move_item(&mut c, 1, 2, None).expect("move whole item"), 2);
+
+        assert_eq!(items(&c), vec![(2, 2, 11)]);
+        let tag: String = c.query_row("SELECT t.name FROM item_tag it JOIN tag t ON t.id=it.tag_id WHERE it.item_id=2", [], |r| r.get(0)).expect("merged tag");
+        assert_eq!(tag, "aa");
+        let shop: Vec<(i64, bool)> = {
+            let mut stmt = c.prepare("SELECT item_id,bought_at IS NOT NULL FROM shop ORDER BY id").expect("prepare shop");
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).expect("query shop").collect::<Result<_, _>>().expect("collect shop")
+        };
+        assert_eq!(shop, vec![(2, true), (2, false)]);
+        let indexed: i64 = c.query_row("SELECT COUNT(*) FROM item_fts WHERE rowid=1", [], |r| r.get(0)).expect("count fts");
+        assert_eq!(indexed, 0);
+    }
+
+    #[test]
+    fn putting_away_a_whole_checkout_merges_into_a_same_name_item() {
+        let mut c = database();
+        add_kitchen_batteries(&c, 3);
+        checkout(&c, 1, 8, 1).expect("check out everything");
+        assert_eq!(put_away(&mut c, 1, 2).expect("put away elsewhere"), 2);
+        assert_eq!(items(&c), vec![(2, 2, 11)]);
+    }
+
+    #[test]
+    fn moving_a_whole_item_without_a_match_relocates_it() {
+        let mut c = database();
+        assert_eq!(move_item(&mut c, 1, 2, None).expect("move whole item"), 1);
+        assert_eq!(items(&c), vec![(1, 2, 8)]);
     }
 
     #[test]

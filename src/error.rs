@@ -39,6 +39,9 @@ impl From<rusqlite::Error> for AppError {
             rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
             rusqlite::Error::SqliteFailure(_, Some(ref msg)) if msg.contains("exceeds available")
                 || msg.contains("below checked-out") => AppError::Conflict(msg.clone()),
+            // A form referred to a location, item or person that was removed meanwhile.
+            rusqlite::Error::SqliteFailure(ref err, _) if err.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY =>
+                AppError::conflict("That changed in the meantime — refresh and try again"),
             other => AppError::Internal(other.to_string()),
         }
     }
@@ -197,6 +200,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let html = body(response).await;
         assert!(html.starts_with("<!doctype html>") && html.contains("Not found"));
+    }
+
+    #[test]
+    fn foreign_key_violations_become_a_refresh_conflict() {
+        let c = rusqlite::Connection::open_in_memory().expect("open in-memory database");
+        c.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE p(id INTEGER PRIMARY KEY); CREATE TABLE ch(p INTEGER REFERENCES p(id));").expect("schema");
+        let error: AppError = c.execute("INSERT INTO ch VALUES (99)", []).expect_err("missing parent").into();
+        assert!(matches!(error, AppError::Conflict(m) if m.contains("refresh")));
     }
 
     #[test]
