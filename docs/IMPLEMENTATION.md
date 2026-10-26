@@ -190,6 +190,10 @@ HTMX conventions:
 
 For local HTTP testing, first build the stylesheet with `scripts/build-css.sh` (rerun it after changing templates or `styles/input.css`, or pass `--watch` to keep it rebuilding), then run `cargo run -- --config config.local.example.toml` and open `http://127.0.0.1:8080`. Create the initial household admin on the setup screen. This config stores test data under `/tmp/homestock-local-data`, binds only to loopback, and disables the Secure cookie flag because the connection is plain HTTP. Use `cookie_secure = true` behind HTTPS; do not expose the local config on a network.
 
+## Documentation screenshots
+
+The images in `docs/images/` are generated, not hand-made. After changing the UI, run `scripts/screenshots/run.sh` to retake them all. It builds the image from the checkout (or pass an image name to skip the build), starts it with a throwaway database, creates the admin through the setup screen, loads a demo household with `demo-data.py`, and captures each screen in headless Firefox with `shoot.mjs` (Puppeteer, pinned in `package-lock.json`). It needs Docker, Node with npm, Python 3, curl and Firefox. The demo data writes to SQLite directly, so it also rebuilds the search index the way `repo::items::reindex` does; if the schema changes, update `demo-data.py` with it. To add a screenshot, add a `shot(...)` line to `shoot.mjs` and reference the new file from the docs.
+
 ## 10. Build order for Copilot
 
 1. `db.rs`, migrations, `config.rs`, `auth.rs`, login/setup pages, `base.html` shell with responsive nav.
