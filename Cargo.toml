@@ -9,7 +9,7 @@ axum-server = { version = "0.8", features = ["tls-rustls"] }
 axum-extra  = { version = "0.12", features = ["cookie"] }
 tokio       = { version = "1", features = ["rt", "macros", "signal", "time", "fs"] }
 tower-http  = { version = "0.7", features = ["fs", "compression-gzip", "limit", "trace", "set-header"] }
-rusqlite    = { version = "0.40", features = ["bundled", "backup"] }
+rusqlite    = { version = "0.41", features = ["bundled", "backup"] }
 askama      = "0.16"
 serde       = { version = "1", features = ["derive"] }
 toml        = "1.1"
