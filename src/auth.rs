@@ -1,6 +1,12 @@
 use crate::{config::SeedUser, error::AppError, AppState};
-use argon2::{password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier}, Argon2};
-use axum::{extract::{FromRef, FromRequestParts}, http::request::Parts};
+use argon2::{
+    password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier},
+    Argon2,
+};
+use axum::{
+    extract::{FromRef, FromRequestParts},
+    http::request::Parts,
+};
 use axum_extra::extract::CookieJar;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -8,14 +14,24 @@ use rusqlite::{params, Connection, OptionalExtension};
 pub const COOKIE: &str = "hs_session";
 
 #[derive(Clone, Debug)]
-pub struct CurrentUser { pub id: i64, pub name: String, pub is_admin: bool, pub theme: String, pub must_change_pw: bool }
+pub struct CurrentUser {
+    pub id: i64,
+    pub name: String,
+    pub is_admin: bool,
+    pub theme: String,
+    pub must_change_pw: bool,
+}
 
 pub fn hash(pw: &str) -> Result<String, AppError> {
-    Argon2::default().hash_password(pw.as_bytes())
-        .map(|h| h.to_string()).map_err(|e| AppError::internal(e.to_string()))
+    Argon2::default()
+        .hash_password(pw.as_bytes())
+        .map(|h| h.to_string())
+        .map_err(|e| AppError::internal(e.to_string()))
 }
 pub fn verify(pw: &str, stored: &str) -> bool {
-    PasswordHash::new(stored).map(|h| Argon2::default().verify_password(pw.as_bytes(), &h).is_ok()).unwrap_or(false)
+    PasswordHash::new(stored)
+        .map(|h| Argon2::default().verify_password(pw.as_bytes(), &h).is_ok())
+        .unwrap_or(false)
 }
 
 /// Longest password accepted anywhere, checked before argon2 runs.
@@ -23,9 +39,15 @@ pub const MAX_PASSWORD_LEN: usize = 1024;
 
 /// The one rule for passwords people choose (setup, Account, admin-set).
 pub fn validate_new_password(pw: &str, confirm: &str) -> Result<(), AppError> {
-    if pw.chars().count() < 8 { return Err(AppError::bad("Password needs at least 8 characters.")); }
-    if pw.len() > MAX_PASSWORD_LEN { return Err(AppError::bad("Password must be 1024 characters or fewer.")); }
-    if pw != confirm { return Err(AppError::bad("The two passwords don’t match.")); }
+    if pw.chars().count() < 8 {
+        return Err(AppError::bad("Password needs at least 8 characters."));
+    }
+    if pw.len() > MAX_PASSWORD_LEN {
+        return Err(AppError::bad("Password must be 1024 characters or fewer."));
+    }
+    if pw != confirm {
+        return Err(AppError::bad("The two passwords don’t match."));
+    }
     Ok(())
 }
 
@@ -33,27 +55,40 @@ pub fn validate_new_password(pw: &str, confirm: &str) -> Result<(), AppError> {
 /// (64³ × 90 ≈ 23.6 million combinations, and it must be changed at first sign-in).
 pub fn temp_password() -> String {
     const WORDS: &[&str] = &[
-        "maple", "river", "cedar", "meadow", "harbor", "copper", "willow", "morning",
-        "silver", "garden", "cabin", "cloud", "amber", "anchor", "apple", "aspen",
-        "badger", "basil", "beacon", "birch", "bramble", "breeze", "brook", "candle",
-        "canyon", "clover", "comet", "coral", "cotton", "crane", "daisy", "delta",
-        "ember", "falcon", "fern", "fjord", "forest", "frost", "glacier", "granite",
-        "hazel", "heron", "island", "ivory", "jasper", "juniper", "lantern", "lemon",
-        "linen", "lotus", "marble", "meteor", "nectar", "oak", "olive", "orchid",
-        "otter", "pebble", "pepper", "pine", "prairie", "quartz", "raven", "saffron",
+        "maple", "river", "cedar", "meadow", "harbor", "copper", "willow", "morning", "silver",
+        "garden", "cabin", "cloud", "amber", "anchor", "apple", "aspen", "badger", "basil",
+        "beacon", "birch", "bramble", "breeze", "brook", "candle", "canyon", "clover", "comet",
+        "coral", "cotton", "crane", "daisy", "delta", "ember", "falcon", "fern", "fjord", "forest",
+        "frost", "glacier", "granite", "hazel", "heron", "island", "ivory", "jasper", "juniper",
+        "lantern", "lemon", "linen", "lotus", "marble", "meteor", "nectar", "oak", "olive",
+        "orchid", "otter", "pebble", "pepper", "pine", "prairie", "quartz", "raven", "saffron",
     ];
     let word = || WORDS[rand::random_range(0..WORDS.len())];
-    format!("{}-{}-{}-{:02}", word(), word(), word(), rand::random_range(10..100))
+    format!(
+        "{}-{}-{}-{:02}",
+        word(),
+        word(),
+        word(),
+        rand::random_range(10..100)
+    )
 }
 
 /// Only when the user table is empty. Seeded accounts must change their password.
 pub fn seed_users(c: &mut Connection, seeds: &[SeedUser]) -> Result<(), AppError> {
-    let n: i64 = c.query_row("SELECT COUNT(*) FROM user WHERE deleted_at IS NULL", [], |r| r.get(0))?;
-    if n > 0 || seeds.is_empty() { return Ok(()); }
+    let n: i64 = c.query_row(
+        "SELECT COUNT(*) FROM user WHERE deleted_at IS NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    if n > 0 || seeds.is_empty() {
+        return Ok(());
+    }
     let tx = c.transaction()?;
     for s in seeds {
-        tx.execute("INSERT INTO user(name, role, password_hash, must_change_pw) VALUES (?1, ?2, ?3, 1)",
-            params![s.name, s.role, hash(&s.password)?])?;
+        tx.execute(
+            "INSERT INTO user(name, role, password_hash, must_change_pw) VALUES (?1, ?2, ?3, 1)",
+            params![s.name, s.role, hash(&s.password)?],
+        )?;
     }
     tx.commit()?;
     tracing::info!("seeded {} users from config", seeds.len());
@@ -61,13 +96,31 @@ pub fn seed_users(c: &mut Connection, seeds: &[SeedUser]) -> Result<(), AppError
 }
 
 /// Valid session for `token`, sliding its expiry to `days` from now.
-pub fn lookup_session(c: &Connection, token: &str, days: i64) -> Result<Option<CurrentUser>, AppError> {
-    let u = c.query_row(
-        "SELECT u.id, u.name, u.role = 'admin', u.theme, u.must_change_pw, s.expires_at
+pub fn lookup_session(
+    c: &Connection,
+    token: &str,
+    days: i64,
+) -> Result<Option<CurrentUser>, AppError> {
+    let u = c
+        .query_row(
+            "SELECT u.id, u.name, u.role = 'admin', u.theme, u.must_change_pw, s.expires_at
          FROM session s JOIN user u ON u.id = s.user_id
          WHERE s.token = ?1 AND s.expires_at > unixepoch() AND u.deleted_at IS NULL",
-        [token], |r| Ok((CurrentUser { id: r.get(0)?, name: r.get(1)?, is_admin: r.get(2)?, theme: r.get(3)?, must_change_pw: r.get(4)? }, r.get::<_, i64>(5)?)),
-    ).optional()?;
+            [token],
+            |r| {
+                Ok((
+                    CurrentUser {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        is_admin: r.get(2)?,
+                        theme: r.get(3)?,
+                        must_change_pw: r.get(4)?,
+                    },
+                    r.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()?;
     if let Some((user, exp)) = u {
         // Sliding expiry, refreshed at most hourly to avoid a write per request.
         c.execute("UPDATE session SET expires_at = unixepoch() + ?3*86400 WHERE token = ?1 AND ?2 < unixepoch() + ?3*86400 - 3600", params![token, exp, days])?;
@@ -77,15 +130,30 @@ pub fn lookup_session(c: &Connection, token: &str, days: i64) -> Result<Option<C
 }
 
 impl<S> FromRequestParts<S> for CurrentUser
-where AppState: FromRef<S>, S: Send + Sync {
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
     type Rejection = AppError;
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let st = AppState::from_ref(state);
-        let jar = CookieJar::from_request_parts(parts, state).await.map_err(|_| AppError::Unauthorized)?;
-        let token = jar.get(COOKIE).map(|c| c.value().to_string()).ok_or(AppError::Unauthorized)?;
+        let jar = CookieJar::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AppError::Unauthorized)?;
+        let token = jar
+            .get(COOKIE)
+            .map(|c| c.value().to_string())
+            .ok_or(AppError::Unauthorized)?;
         let days = st.cfg.session_days;
-        let user = st.db.call(move |c| lookup_session(c, &token, days)).await?.ok_or(AppError::Unauthorized)?;
-        if user.must_change_pw && !parts.uri.path().starts_with("/account") && parts.uri.path() != "/me/theme" {
+        let user = st
+            .db
+            .call(move |c| lookup_session(c, &token, days))
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+        if user.must_change_pw
+            && !parts.uri.path().starts_with("/account")
+            && parts.uri.path() != "/me/theme"
+        {
             return Err(AppError::PasswordChangeRequired);
         }
         Ok(user)
@@ -95,11 +163,18 @@ where AppState: FromRef<S>, S: Send + Sync {
 /// Use as an extractor on admin-only handlers.
 pub struct AdminUser(pub CurrentUser);
 impl<S> FromRequestParts<S> for AdminUser
-where AppState: FromRef<S>, S: Send + Sync {
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
     type Rejection = AppError;
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let u = CurrentUser::from_request_parts(parts, state).await?;
-        if u.is_admin { Ok(AdminUser(u)) } else { Err(AppError::Forbidden) }
+        if u.is_admin {
+            Ok(AdminUser(u))
+        } else {
+            Err(AppError::Forbidden)
+        }
     }
 }
 
@@ -109,7 +184,10 @@ pub fn create_session(c: &Connection, user_id: i64, days: i64) -> Result<String,
     rand::fill(&mut token);
     let token = URL_SAFE_NO_PAD.encode(token);
     c.execute("DELETE FROM session WHERE expires_at <= unixepoch()", [])?;
-    c.execute("INSERT INTO session(token, user_id, expires_at) VALUES (?1, ?2, unixepoch() + ?3 * 86400)", params![token, user_id, days])?;
+    c.execute(
+        "INSERT INTO session(token, user_id, expires_at) VALUES (?1, ?2, unixepoch() + ?3 * 86400)",
+        params![token, user_id, days],
+    )?;
     Ok(token)
 }
 
@@ -119,21 +197,36 @@ mod tests {
 
     fn database() -> Connection {
         let c = Connection::open_in_memory().expect("open in-memory database");
-        c.execute_batch(include_str!("../migrations/0001_init.sql")).expect("apply schema");
-        c.execute_batch(include_str!("../migrations/0002_soft_delete_users.sql")).expect("apply user migration");
-        c.execute("INSERT INTO user(name,role,password_hash) VALUES ('Alex','admin','hash')", []).expect("insert user");
+        c.execute_batch(include_str!("../migrations/0001_init.sql"))
+            .expect("apply schema");
+        c.execute_batch(include_str!("../migrations/0002_soft_delete_users.sql"))
+            .expect("apply user migration");
+        c.execute(
+            "INSERT INTO user(name,role,password_hash) VALUES ('Alex','admin','hash')",
+            [],
+        )
+        .expect("insert user");
         c
     }
 
     fn expiry(c: &Connection, token: &str) -> i64 {
-        c.query_row("SELECT expires_at - unixepoch() FROM session WHERE token=?1", [token], |r| r.get(0)).expect("read expiry")
+        c.query_row(
+            "SELECT expires_at - unixepoch() FROM session WHERE token=?1",
+            [token],
+            |r| r.get(0),
+        )
+        .expect("read expiry")
     }
 
     #[test]
     fn sliding_expiry_follows_configured_session_days() {
         let c = database();
         let token = create_session(&c, 1, 90).expect("create session");
-        c.execute("UPDATE session SET expires_at = unixepoch() + 86400 WHERE token=?1", [&token]).expect("age session");
+        c.execute(
+            "UPDATE session SET expires_at = unixepoch() + 86400 WHERE token=?1",
+            [&token],
+        )
+        .expect("age session");
         assert!(lookup_session(&c, &token, 90).expect("look up").is_some());
         assert!((90 * 86400 - 5..=90 * 86400).contains(&expiry(&c, &token)));
     }
@@ -142,7 +235,11 @@ mod tests {
     fn fresh_sessions_are_not_rewritten_on_every_request() {
         let c = database();
         let token = create_session(&c, 1, 7).expect("create session");
-        c.execute("UPDATE session SET expires_at = unixepoch() + 7*86400 - 60 WHERE token=?1", [&token]).expect("touch session");
+        c.execute(
+            "UPDATE session SET expires_at = unixepoch() + 7*86400 - 60 WHERE token=?1",
+            [&token],
+        )
+        .expect("touch session");
         lookup_session(&c, &token, 7).expect("look up");
         assert!(expiry(&c, &token) <= 7 * 86400 - 60);
     }
@@ -150,10 +247,19 @@ mod tests {
     #[test]
     fn new_sessions_clear_expired_ones() {
         let c = database();
-        c.execute("INSERT INTO session(token,user_id,expires_at) VALUES ('old',1,unixepoch()-1)", []).expect("insert expired");
+        c.execute(
+            "INSERT INTO session(token,user_id,expires_at) VALUES ('old',1,unixepoch()-1)",
+            [],
+        )
+        .expect("insert expired");
         let token = create_session(&c, 1, 30).expect("create session");
-        let tokens: Vec<String> = c.prepare("SELECT token FROM session").expect("prepare")
-            .query_map([], |r| r.get(0)).expect("query").collect::<Result<_, _>>().expect("collect");
+        let tokens: Vec<String> = c
+            .prepare("SELECT token FROM session")
+            .expect("prepare")
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("collect");
         assert_eq!(tokens, vec![token]);
     }
 }

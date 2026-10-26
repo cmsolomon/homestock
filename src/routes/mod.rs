@@ -1,16 +1,23 @@
 use crate::{activity, AppState};
-use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
 use axum::http::{header, HeaderValue};
-use tower_http::{compression::CompressionLayer, services::ServeDir, set_header::SetResponseHeaderLayer};
+use axum::{
+    extract::DefaultBodyLimit,
+    middleware,
+    routing::{get, post},
+    Router,
+};
+use tower_http::{
+    compression::CompressionLayer, services::ServeDir, set_header::SetResponseHeaderLayer,
+};
 
+pub mod account;
+pub mod auth;
+pub mod export;
+pub mod items;
 pub mod locations;
 pub mod quick_add;
-pub mod auth;
-pub mod items;
 pub mod search;
 pub mod shopping;
-pub mod export;
-pub mod account;
 pub mod users;
 
 pub fn router(state: AppState) -> Router {
@@ -23,7 +30,10 @@ pub fn router(state: AppState) -> Router {
         .route("/loc", get(locations::root).post(locations::create_root))
         .route("/loc/contents", get(locations::root_contents))
         .route("/loc/new", get(locations::new_root))
-        .route("/loc/{id}", get(locations::show).post(locations::create_child))
+        .route(
+            "/loc/{id}",
+            get(locations::show).post(locations::create_child),
+        )
         .route("/loc/{id}/contents", get(locations::contents))
         .route("/loc/{id}/move", post(locations::move_box))
         .route("/loc/{id}/new-box", get(locations::new_child))
@@ -31,12 +41,18 @@ pub fn router(state: AppState) -> Router {
         .route("/loc/{id}/edit", get(locations::edit))
         .route("/loc/{id}/rename", post(locations::rename))
         .route("/loc/{id}/delete", post(locations::delete))
-        .route("/items/{id}", get(items::detail).delete(items::delete).post(items::delete))
+        .route(
+            "/items/{id}",
+            get(items::detail).delete(items::delete).post(items::delete),
+        )
         .route("/items/{id}/update", post(items::update))
         .route("/items/{id}/delete", post(items::delete))
         .route("/items/{id}/checkout", post(items::checkout))
         .route("/items/{id}/move", post(items::move_item))
-        .route("/items/{id}/consume", get(items::consume_dialog).post(items::consume))
+        .route(
+            "/items/{id}/consume",
+            get(items::consume_dialog).post(items::consume),
+        )
         .route("/in-use", get(items::in_use))
         .route("/search", get(search::index))
         .route("/shopping", get(shopping::index).post(shopping::add))
@@ -44,13 +60,19 @@ pub fn router(state: AppState) -> Router {
         .route("/shopping/{id}/remove", post(shopping::remove))
         .route("/shopping/{id}/restock", post(shopping::restock))
         .route("/shopping/from-item/{id}", post(shopping::from_item))
-        .route("/shopping/from-item/{id}/remove", post(shopping::remove_from_item))
+        .route(
+            "/shopping/from-item/{id}/remove",
+            post(shopping::remove_from_item),
+        )
         .route("/shopping/share.txt", get(shopping::share_text_route))
         .route("/shopping/share-sheet", get(shopping::share_sheet))
         .route("/export.csv", get(export::csv))
         .route("/account", get(account::page))
         .route("/account/password", post(account::change_password))
-        .route("/account/logout-everywhere", post(account::logout_everywhere))
+        .route(
+            "/account/logout-everywhere",
+            post(account::logout_everywhere),
+        )
         .route("/me/theme", post(account::theme))
         .route("/household", get(users::page))
         .route("/users", post(users::create))
@@ -62,21 +84,43 @@ pub fn router(state: AppState) -> Router {
         .route("/checkouts/{id}/reassign", post(items::reassign))
         .route("/checkouts/{id}/put-away", post(items::put_away))
         .route("/checkouts/{id}/consume", post(items::consume_checkout))
-        .route("/loc/{id}/quick-add", get(quick_add::sheet).post(quick_add::create).layer(DefaultBodyLimit::max(25 * 1024 * 1024)))   // phone photos
+        .route(
+            "/loc/{id}/quick-add",
+            get(quick_add::sheet)
+                .post(quick_add::create)
+                .layer(DefaultBodyLimit::max(25 * 1024 * 1024)),
+        ) // phone photos
         .route("/quick-add", get(quick_add::last))
         .nest_service("/photos", photos)
-        .nest_service("/static", ServeDir::new("static"))   // or rust-embed for a single binary
+        .nest_service("/static", ServeDir::new("static")) // or rust-embed for a single binary
         .layer(middleware::from_fn(crate::error::present))
-        .layer(DefaultBodyLimit::max(64 * 1024))            // forms; quick-add raises its own
+        .layer(DefaultBodyLimit::max(64 * 1024)) // forms; quick-add raises its own
         .layer(middleware::from_fn(crate::security::same_origin))
-        .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
-        .layer(SetResponseHeaderLayer::if_not_present(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
-        .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'")))
-        .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("frame-ancestors 'none'"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("same-origin"),
+        ))
         .layer(CompressionLayer::new())
-        .layer(middleware::from_fn_with_state(state.activity.clone(), activity::track))
+        .layer(middleware::from_fn_with_state(
+            state.activity.clone(),
+            activity::track,
+        ))
         .with_state(state)
 }
 
 /// HTMX-aware helper: true when the request came from hx-get/hx-post.
-pub fn is_htmx(h: &axum::http::HeaderMap) -> bool { h.contains_key("HX-Request") }
+pub fn is_htmx(h: &axum::http::HeaderMap) -> bool {
+    h.contains_key("HX-Request")
+}

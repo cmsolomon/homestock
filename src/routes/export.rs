@@ -1,5 +1,9 @@
 use crate::{auth::CurrentUser, error::AppError, repo::locations, AppState};
-use axum::{extract::{Query, State}, http::{header, HeaderValue}, response::Response};
+use axum::{
+    extract::{Query, State},
+    http::{header, HeaderValue},
+    response::Response,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -25,26 +29,63 @@ fn build_csv(c: &rusqlite::Connection, location_id: Option<i64>) -> Result<Vec<u
          WHERE ?1 IS NULL OR s.location_id IN (SELECT id FROM sub)
          ORDER BY s.id",
     )?;
-    let rows = stmt.query_map([location_id], |r| Ok((
-        r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,
-        r.get::<_,i64>(4)?,r.get::<_,i64>(5)?,r.get::<_,String>(6)?,r.get::<_,i64>(7)?,r.get::<_,String>(8)?,
-    )))?.collect::<Result<Vec<_>,_>>()?;
+    let rows = stmt
+        .query_map([location_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, i64>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, i64>(7)?,
+                r.get::<_, String>(8)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     let mut writer = csv::Writer::from_writer(Vec::new());
-    writer.write_record(["id","name","quantity","unit","available","in_use","checked_out_by","location","tags"])
-        .map_err(|e|AppError::internal(e.to_string()))?;
+    writer
+        .write_record([
+            "id",
+            "name",
+            "quantity",
+            "unit",
+            "available",
+            "in_use",
+            "checked_out_by",
+            "location",
+            "tags",
+        ])
+        .map_err(|e| AppError::internal(e.to_string()))?;
     for row in rows {
-        writer.write_record([
-            row.0.to_string(),cell(row.1),row.2.to_string(),cell(row.3),row.4.to_string(),row.5.to_string(),
-            cell(row.6),cell(locations::path_text(c,row.7)?),cell(row.8),
-        ]).map_err(|e|AppError::internal(e.to_string()))?;
+        writer
+            .write_record([
+                row.0.to_string(),
+                cell(row.1),
+                row.2.to_string(),
+                cell(row.3),
+                row.4.to_string(),
+                row.5.to_string(),
+                cell(row.6),
+                cell(locations::path_text(c, row.7)?),
+                cell(row.8),
+            ])
+            .map_err(|e| AppError::internal(e.to_string()))?;
     }
-    writer.into_inner().map_err(|e|AppError::internal(e.to_string()))
+    writer
+        .into_inner()
+        .map_err(|e| AppError::internal(e.to_string()))
 }
 
 /// Text cells starting with a formula character get a leading `'` so spreadsheet apps
 /// show them as text instead of evaluating them (CSV formula injection).
 fn cell(text: String) -> String {
-    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) { format!("'{text}") } else { text }
+    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{text}")
+    } else {
+        text
+    }
 }
 
 pub async fn csv(
@@ -59,10 +100,15 @@ pub async fn csv(
         |id| format!("homestock-location-{id}-inventory.csv"),
     );
     let mut response = Response::new(axum::body::Body::from(bytes));
-    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/csv; charset=utf-8"));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/csv; charset=utf-8"),
+    );
     let disposition = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-        .map_err(|e|AppError::internal(e.to_string()))?;
-    response.headers_mut().insert(header::CONTENT_DISPOSITION, disposition);
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    response
+        .headers_mut()
+        .insert(header::CONTENT_DISPOSITION, disposition);
     Ok(response)
 }
 
@@ -73,10 +119,15 @@ mod tests {
 
     fn database() -> Connection {
         let c = Connection::open_in_memory().expect("open in-memory database");
-        c.execute_batch(include_str!("../../migrations/0001_init.sql")).expect("apply schema");
-        c.execute_batch(include_str!("../../migrations/0002_soft_delete_users.sql")).expect("apply user migration");
-        c.execute("INSERT INTO user(name,role,password_hash) VALUES ('Alex','admin','hash')", [])
-            .expect("insert user");
+        c.execute_batch(include_str!("../../migrations/0001_init.sql"))
+            .expect("apply schema");
+        c.execute_batch(include_str!("../../migrations/0002_soft_delete_users.sql"))
+            .expect("apply user migration");
+        c.execute(
+            "INSERT INTO user(name,role,password_hash) VALUES ('Alex','admin','hash')",
+            [],
+        )
+        .expect("insert user");
         c.execute_batch(
             "INSERT INTO location(name,kind) VALUES ('Garage','Room');
              INSERT INTO location(name,kind,parent_id) VALUES ('Tool chest','Box',1);
@@ -84,7 +135,8 @@ mod tests {
              INSERT INTO item(name,location_id,qty) VALUES ('Hammer',1,1);
              INSERT INTO item(name,location_id,qty) VALUES ('Wrench',2,2);
              INSERT INTO item(name,location_id,qty) VALUES ('Mug',3,4);",
-        ).expect("insert inventory");
+        )
+        .expect("insert inventory");
         c
     }
 
@@ -94,10 +146,24 @@ mod tests {
         let bytes = build_csv(&c, Some(1)).expect("build location export");
         let mut reader = csv::Reader::from_reader(bytes.as_slice());
         let headers = reader.headers().expect("read CSV header");
-        assert_eq!(headers.iter().collect::<Vec<_>>(), vec![
-            "id","name","quantity","unit","available","in_use","checked_out_by","location","tags",
-        ]);
-        let rows = reader.records().collect::<Result<Vec<_>,_>>().expect("read CSV rows");
+        assert_eq!(
+            headers.iter().collect::<Vec<_>>(),
+            vec![
+                "id",
+                "name",
+                "quantity",
+                "unit",
+                "available",
+                "in_use",
+                "checked_out_by",
+                "location",
+                "tags",
+            ]
+        );
+        let rows = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read CSV rows");
         assert_eq!(rows.len(), 2);
         assert_eq!(&rows[0][1], "Hammer");
         assert_eq!(&rows[0][7], "Garage");
@@ -108,10 +174,17 @@ mod tests {
     #[test]
     fn formula_like_text_is_exported_as_text() {
         let c = database();
-        c.execute("UPDATE item SET name='=HYPERLINK(\"http://x\")' WHERE id=1", []).expect("rename item");
+        c.execute(
+            "UPDATE item SET name='=HYPERLINK(\"http://x\")' WHERE id=1",
+            [],
+        )
+        .expect("rename item");
         let bytes = build_csv(&c, Some(1)).expect("build export");
         let mut reader = csv::Reader::from_reader(bytes.as_slice());
-        let rows = reader.records().collect::<Result<Vec<_>,_>>().expect("read CSV rows");
+        let rows = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read CSV rows");
         assert_eq!(&rows[0][1], "'=HYPERLINK(\"http://x\")");
         assert_eq!(&rows[1][1], "Wrench");
     }
@@ -121,7 +194,10 @@ mod tests {
         let c = database();
         let bytes = build_csv(&c, None).expect("build all-inventory export");
         let mut reader = csv::Reader::from_reader(bytes.as_slice());
-        let rows = reader.records().collect::<Result<Vec<_>,_>>().expect("read CSV rows");
+        let rows = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read CSV rows");
         assert_eq!(rows.len(), 3);
     }
 }

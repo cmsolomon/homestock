@@ -7,9 +7,19 @@
 //! - NAS synchronization is handled outside the app so the service can start before SMB.
 use crate::{activity::Activity, config::BackupConfig, db::open_conn};
 use rusqlite::{backup::Backup, Connection};
-use std::{fs, path::PathBuf, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
-fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() }
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
 
 pub struct Backupper {
     cfg: BackupConfig,
@@ -24,25 +34,44 @@ impl Backupper {
     pub fn new(cfg: BackupConfig, db_path: PathBuf, data_dir: PathBuf) -> rusqlite::Result<Self> {
         let conn = Connection::open(&db_path)?;
         let last_version = conn.query_row("PRAGMA data_version", [], |r| r.get(0))?;
-        Ok(Self { cfg, db_path, data_dir, conn, last_version: Some(last_version), last_backup: 0 })
+        Ok(Self {
+            cfg,
+            db_path,
+            data_dir,
+            conn,
+            last_version: Some(last_version),
+            last_backup: 0,
+        })
     }
 
     fn dirty(&mut self) -> rusqlite::Result<bool> {
-        let v: i64 = self.conn.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+        let v: i64 = self
+            .conn
+            .query_row("PRAGMA data_version", [], |r| r.get(0))?;
         Ok(self.last_version != Some(v))
     }
 
     /// Decide and (maybe) run. Called every 60 s on the blocking pool, and once at shutdown with `force`.
     pub fn tick(&mut self, activity: &Activity, force: bool) {
-        let dirty = match self.dirty() { Ok(d) => d, Err(e) => { tracing::warn!("backup: data_version failed: {e}"); return; } };
-        if !dirty { return; }
+        let dirty = match self.dirty() {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("backup: data_version failed: {e}");
+                return;
+            }
+        };
+        if !dirty {
+            return;
+        }
         let t = now();
         let idle = t.saturating_sub(activity.last_request()) >= self.cfg.idle_secs;
         let since = t.saturating_sub(self.last_backup);
         let due = force
             || (idle && since >= self.cfg.min_interval_secs)
             || since >= self.cfg.max_interval_secs;
-        if !due { return; }
+        if !due {
+            return;
+        }
         match self.run() {
             Ok(name) => {
                 self.last_backup = t;
@@ -51,7 +80,9 @@ impl Backupper {
                     Err(e) => tracing::warn!("backup: data_version refresh failed: {e}"),
                 }
                 tracing::info!("backup: staged local copy {name}");
-                if let Err(e) = self.prune_pending() { tracing::warn!("backup: pending-copy prune failed: {e}"); }
+                if let Err(e) = self.prune_pending() {
+                    tracing::warn!("backup: pending-copy prune failed: {e}");
+                }
                 let _ = self.conn.execute_batch("PRAGMA optimize;");
             }
             Err(e) => tracing::error!("backup: failed: {e}"),
@@ -78,7 +109,9 @@ impl Backupper {
             b.run_to_completion(256, Duration::from_millis(20), None)?;
             drop(b);
             let check: String = dst.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
-            if check != "ok" { return Err(format!("quick_check: {check}").into()); }
+            if check != "ok" {
+                return Err(format!("quick_check: {check}").into());
+            }
         } // dst closed + flushed here
 
         fs::File::open(&tmp)?.sync_all()?;
@@ -92,7 +125,9 @@ impl Backupper {
         let mut files = Vec::new();
         for entry in fs::read_dir(self.data_dir.join("staging"))? {
             let path = entry?.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
             if name.starts_with("homestock-") && name.ends_with(".sqlite3.part") {
                 fs::remove_file(path)?;
             } else if name.starts_with("homestock-") && name.ends_with(".sqlite3") {
@@ -101,13 +136,19 @@ impl Backupper {
         }
         files.sort();
         let excess = files.len().saturating_sub(self.cfg.pending_keep);
-        for p in files.into_iter().take(excess) { fs::remove_file(p)?; }
+        for p in files.into_iter().take(excess) {
+            fs::remove_file(p)?;
+        }
         Ok(())
     }
 }
 
 /// Spawned from main. Wakes once a minute; nearly free when idle.
-pub async fn run_loop(mut b: Backupper, activity: Arc<Activity>, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+pub async fn run_loop(
+    mut b: Backupper,
+    activity: Arc<Activity>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
     let mut iv = tokio::time::interval(Duration::from_secs(60));
     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -131,10 +172,16 @@ mod tests {
     use crate::activity::Activity;
     use crate::config::BackupConfig;
     use rusqlite::Connection;
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn test_directory() -> std::path::PathBuf {
-        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("homestock-backup-test-{suffix}"));
         fs::create_dir_all(&dir).expect("create test directory");
         dir
@@ -154,17 +201,18 @@ mod tests {
         let dir = test_directory();
         let db_path = dir.join("homestock.sqlite3");
         let other_connection = Connection::open(&db_path).expect("open database");
-        other_connection.execute_batch("CREATE TABLE sample (value INTEGER);").expect("create table");
+        other_connection
+            .execute_batch("CREATE TABLE sample (value INTEGER);")
+            .expect("create table");
 
-        let mut backupper = Backupper::new(
-            test_config(),
-            db_path,
-            dir.clone(),
-        ).expect("create backupper");
+        let mut backupper =
+            Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
 
         assert!(!backupper.dirty().expect("check initial database version"));
 
-        other_connection.execute("INSERT INTO sample(value) VALUES (1)", []).expect("commit change");
+        other_connection
+            .execute("INSERT INTO sample(value) VALUES (1)", [])
+            .expect("commit change");
         assert!(backupper.dirty().expect("detect external database change"));
 
         drop(backupper);
@@ -177,20 +225,30 @@ mod tests {
         let dir = test_directory();
         let db_path = dir.join("homestock.sqlite3");
         let other_connection = Connection::open(&db_path).expect("open database");
-        other_connection.execute_batch("CREATE TABLE sample (value INTEGER);").expect("create table");
+        other_connection
+            .execute_batch("CREATE TABLE sample (value INTEGER);")
+            .expect("create table");
 
-        let mut backupper = Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
-        other_connection.execute("INSERT INTO sample(value) VALUES (1)", []).expect("commit change");
+        let mut backupper =
+            Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
+        other_connection
+            .execute("INSERT INTO sample(value) VALUES (1)", [])
+            .expect("commit change");
         backupper.tick(&Activity::default(), true);
 
         let staging = dir.join("staging");
-        let backups: Vec<_> = fs::read_dir(&staging).expect("list pending directory")
+        let backups: Vec<_> = fs::read_dir(&staging)
+            .expect("list pending directory")
             .map(|entry| entry.expect("read pending entry").path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "sqlite3"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "sqlite3")
+            })
             .collect();
         assert_eq!(backups.len(), 1);
         let backup = Connection::open(&backups[0]).expect("open staged backup");
-        let value: i64 = backup.query_row("SELECT value FROM sample", [], |row| row.get(0))
+        let value: i64 = backup
+            .query_row("SELECT value FROM sample", [], |row| row.get(0))
             .expect("read staged data");
         assert_eq!(value, 1);
         assert!(!dir.join("backups").exists());
@@ -206,24 +264,42 @@ mod tests {
         let dir = test_directory();
         let db_path = dir.join("homestock.sqlite3");
         let _connection = Connection::open(&db_path).expect("open database");
-        let backupper = Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
+        let backupper =
+            Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
         let staging = dir.join("staging");
         fs::create_dir_all(&staging).expect("create pending directory");
         for timestamp in 1..=4 {
-            fs::write(staging.join(format!("homestock-{timestamp}.sqlite3")), b"backup")
-                .expect("create pending backup");
+            fs::write(
+                staging.join(format!("homestock-{timestamp}.sqlite3")),
+                b"backup",
+            )
+            .expect("create pending backup");
         }
         fs::write(staging.join("homestock-5.sqlite3.part"), b"incomplete")
             .expect("create partial backup");
 
         backupper.prune_pending().expect("prune pending backups");
 
-        let files: Vec<_> = fs::read_dir(&staging).expect("list pending backups")
-            .map(|entry| entry.expect("read pending entry").file_name().into_string().expect("utf-8 name"))
+        let files: Vec<_> = fs::read_dir(&staging)
+            .expect("list pending backups")
+            .map(|entry| {
+                entry
+                    .expect("read pending entry")
+                    .file_name()
+                    .into_string()
+                    .expect("utf-8 name")
+            })
             .collect();
         let mut files = files;
         files.sort();
-        assert_eq!(files, ["homestock-2.sqlite3", "homestock-3.sqlite3", "homestock-4.sqlite3"]);
+        assert_eq!(
+            files,
+            [
+                "homestock-2.sqlite3",
+                "homestock-3.sqlite3",
+                "homestock-4.sqlite3"
+            ]
+        );
 
         drop(backupper);
         fs::remove_dir_all(dir).expect("remove test directory");
