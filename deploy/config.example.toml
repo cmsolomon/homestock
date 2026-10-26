@@ -1,10 +1,12 @@
-bind = "0.0.0.0:8443"
+# Homestock configuration. The installer writes config.toml from these settings; paths are
+# inside the container. For running locally with cargo, see config.local.example.toml.
+bind     = "0.0.0.0:8443"
 tls_cert = "/etc/homestock/certs/cert.pem"
-tls_key = "/etc/homestock/certs/key.pem"
-data_dir = "/var/lib/homestock"
+tls_key  = "/etc/homestock/certs/key.pem"
+data_dir = "/var/lib/homestock"        # photos/ and pending backup copies
 database_path = "/var/lib/homestock/homestock.sqlite3"
 session_days = 30
-cookie_secure = true
+cookie_secure = true                # Set false only for local HTTP testing; keep true behind HTTPS.
 
 # Reverse proxies whose X-Forwarded-For header is trusted for the client address, e.g. HAProxy
 # on OPNsense doing TLS offloading (enable its X-Forwarded-For option). Without this, every
@@ -13,7 +15,7 @@ cookie_secure = true
 # trusted_proxies = ["10.0.10.1"]
 
 [backup]
-idle_secs = 300
-min_interval_secs = 1800
-max_interval_secs = 86400
-pending_keep = 3
+idle_secs          = 300               # no requests for this long = idle
+min_interval_secs  = 1800              # at most one idle backup per 30 min
+max_interval_secs  = 86400             # force a backup daily if anything changed
+pending_keep       = 3                 # local copies kept while waiting for NAS sync

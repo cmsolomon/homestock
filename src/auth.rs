@@ -1,4 +1,4 @@
-use crate::{config::SeedUser, error::AppError, AppState};
+use crate::{error::AppError, AppState};
 use argon2::{
     password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier},
     Argon2,
@@ -71,28 +71,6 @@ pub fn temp_password() -> String {
         word(),
         rand::random_range(10..100)
     )
-}
-
-/// Only when the user table is empty. Seeded accounts must change their password.
-pub fn seed_users(c: &mut Connection, seeds: &[SeedUser]) -> Result<(), AppError> {
-    let n: i64 = c.query_row(
-        "SELECT COUNT(*) FROM user WHERE deleted_at IS NULL",
-        [],
-        |r| r.get(0),
-    )?;
-    if n > 0 || seeds.is_empty() {
-        return Ok(());
-    }
-    let tx = c.transaction()?;
-    for s in seeds {
-        tx.execute(
-            "INSERT INTO user(name, role, password_hash, must_change_pw) VALUES (?1, ?2, ?3, 1)",
-            params![s.name, s.role, hash(&s.password)?],
-        )?;
-    }
-    tx.commit()?;
-    tracing::info!("seeded {} users from config", seeds.len());
-    Ok(())
 }
 
 /// Valid session for `token`, sliding its expiry to `days` from now.

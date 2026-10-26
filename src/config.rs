@@ -16,8 +16,6 @@ pub struct Config {
     #[serde(default = "yes")]
     pub cookie_secure: bool,
     pub backup: BackupConfig,
-    #[serde(default)]
-    pub seed_users: Vec<SeedUser>,
     /// Reverse proxies (e.g. HAProxy) whose X-Forwarded-For is trusted for the client address.
     #[serde(default)]
     pub trusted_proxies: Vec<std::net::IpAddr>,
@@ -53,15 +51,9 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Deserialize, Clone)]
-pub struct SeedUser {
-    pub name: String,
-    #[serde(default = "member")]
-    pub role: String,
-    pub password: String,
-}
-fn member() -> String {
-    "member".into()
+/// Accounts were once seeded from `[[seed_users]]`, with their passwords in the config file.
+fn has_seed_users(text: &str) -> bool {
+    toml::from_str::<toml::Table>(text).is_ok_and(|t| t.contains_key("seed_users"))
 }
 
 impl Config {
@@ -79,6 +71,13 @@ impl Config {
             toml::from_str(&text).map_err(|e| format!("invalid config {}: {e}", path.display()))?;
         if cfg.session_days < 1 {
             return Err("session_days must be at least 1".into());
+        }
+        if has_seed_users(&text) {
+            tracing::warn!(
+                "{}: seed_users is no longer used; remove it and its passwords. Create the first \
+                 admin on the setup screen, or with `homestock create-admin NAME`",
+                path.display()
+            );
         }
         Ok(cfg)
     }
@@ -116,6 +115,21 @@ mod tests {
             Some(std::path::Path::new("/certs/key.pem"))
         );
         assert_eq!(config.backup.pending_keep, 3);
+    }
+
+    #[test]
+    fn config_with_retired_seed_users_still_loads_and_is_noticed() {
+        let text = r#"
+            bind = "0.0.0.0:8080"
+            data_dir = "/data"
+            [backup]
+            [[seed_users]]
+            name = "Alex"
+            password = "change-me-now"
+            "#;
+        toml::from_str::<Config>(text).expect("seed_users is ignored");
+        assert!(super::has_seed_users(text));
+        assert!(!super::has_seed_users("bind = \"x\"\n"));
     }
 
     #[test]

@@ -74,10 +74,6 @@ async fn run_server(cfg: config::Config) -> anyhow_free::Result {
         std::fs::create_dir_all(parent)?;
     }
     let db = db::Db::open(&db_path)?;
-    {
-        let seeds = cfg.seed_users.clone();
-        db.call(move |c| auth::seed_users(c, &seeds)).await?;
-    }
 
     let activity = Arc::new(activity::Activity::default());
     let state = AppState {

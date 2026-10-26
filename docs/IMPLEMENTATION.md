@@ -33,7 +33,7 @@ homestock/
 ├── Dockerfile                  # offline runtime image
 ├── deploy/                     # Compose, config template, install/upgrade scripts
 ├── build.rs                    # optional: run tailwind CLI if present
-├── config.example.toml
+├── config.local.example.toml  # for cargo run; deploy/config.example.toml for installs
 ├── migrations/
 │   ├── 0001_init.sql           # executed at startup (user_version gate)
 │   └── 0002_soft_delete_users.sql # retains removed accounts and reserves names
@@ -57,7 +57,7 @@ homestock/
 │   ├── household.html  account.html
 │   └── _toast.html             # OOB swap target
 └── src/
-    ├── main.rs                 # config, db, migrations, seed, router, backup task
+    ├── main.rs                 # config, db, migrations, router, backup task
     ├── config.rs
     ├── db.rs                   # Db wrapper (spawn_blocking), pragmas, migrate
     ├── error.rs                # AppError → Response (HTMX-aware)
@@ -193,7 +193,7 @@ For local HTTP testing, first build the stylesheet with `scripts/build-css.sh` (
 
 ## 10. Build order for Copilot
 
-1. `db.rs`, migrations, `config.rs`, seed users, `auth.rs`, login/setup pages, `base.html` shell with responsive nav.
+1. `db.rs`, migrations, `config.rs`, `auth.rs`, login/setup pages, `base.html` shell with responsive nav.
 2. Locations: tree, `/loc/{id}`, scope toggle, box/room create, empty state.
 3. Quick add (variant A) with photo upload.
 4. Item detail: qty / min / notes edit, move with split/merge.
