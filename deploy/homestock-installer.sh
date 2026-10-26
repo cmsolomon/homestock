@@ -25,6 +25,8 @@ Options:
   --install-dir DIR     Deployment files (default /opt/homestock)
   --data-dir DIR        Database and photos (default /srv/homestock/data)
   --certs-dir DIR       cert.pem and key.pem (default /srv/homestock/certs)
+  --nas-dir DIR          Copy backups to this folder, already mounted from a NAS
+  --nas-rclone          Copy backups to an SMB share mounted with rclone (asks for the login)
   --image REF           Use this image instead of the release's (for testing)
   -y, --yes             Don't ask: accept defaults and install Docker if it is missing
   -h, --help            Show this help
@@ -40,7 +42,7 @@ warn() { printf '\033[1;33mhomestock: warning:\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31mhomestock: error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- options -------------------------------------------------------------------------------
-opt_hostname="" opt_port="" opt_image="" assume_yes=false proxies_given=false
+opt_hostname="" opt_port="" opt_image="" assume_yes=false proxies_given=false opt_nas=""
 install_dir=/opt/homestock opt_data_dir="" opt_certs_dir=""
 opt_proxies=()
 while [[ $# -gt 0 ]]; do
@@ -51,6 +53,8 @@ while [[ $# -gt 0 ]]; do
     --install-dir) install_dir="${2:?--install-dir needs a value}"; shift 2 ;;
     --data-dir) opt_data_dir="${2:?--data-dir needs a value}"; shift 2 ;;
     --certs-dir) opt_certs_dir="${2:?--certs-dir needs a value}"; shift 2 ;;
+    --nas-dir) opt_nas="mount ${2:?--nas-dir needs a value}"; shift 2 ;;
+    --nas-rclone) opt_nas=rclone; shift ;;
     --image) opt_image="${2:?--image needs a value}"; shift 2 ;;
     -y|--yes) assume_yes=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -156,6 +160,8 @@ if [[ -f "$conf" ]]; then
     warn "ignoring --hostname/--port/--data-dir/--certs-dir: this install's settings are in $conf"
   fi
   $proxies_given && warn "ignoring --trusted-proxy: set trusted_proxies in $install_dir/config.toml"
+  [[ -z "$opt_nas" ]] || warn "ignoring --nas-dir/--nas-rclone: use sudo homestock-nas setup"
+  opt_nas=""
 elif [[ -f "$legacy_env" ]]; then
   say "adopting the existing install in $install_dir (its .env and config.toml are kept)"
   resolve() { local v; v="$(kv_get "$legacy_env" "$1")"; v="${v:-$2}"; [[ "$v" == /* ]] || v="$install_dir/${v#./}"; echo "$v"; }
@@ -168,7 +174,12 @@ elif [[ -f "$legacy_env" ]]; then
     legacy_gid="$(kv_get "$legacy_env" HOMESTOCK_GID)"
     echo "HOMESTOCK_UID=${legacy_uid:-$APP_UID}"
     echo "HOMESTOCK_GID=${legacy_gid:-$APP_GID}"
-    for key in HOMESTOCK_BACKUP_DIR HOMESTOCK_BACKUP_SENTINEL HOMESTOCK_BACKUP_KEEP HOMESTOCK_BACKUP_REQUIRE_MOUNT HOMESTOCK_SYNC_PHOTOS; do
+    # A hand-made backup sync keeps going, as a NAS folder mounted by whatever mounted it.
+    if [[ -n "$(kv_get "$legacy_env" HOMESTOCK_BACKUP_DIR)" ]]; then
+      echo "HOMESTOCK_NAS_MODE=mount"
+      echo "HOMESTOCK_BACKUP_DIR=$(resolve HOMESTOCK_BACKUP_DIR ./backups)"
+    fi
+    for key in HOMESTOCK_BACKUP_SENTINEL HOMESTOCK_BACKUP_KEEP HOMESTOCK_BACKUP_REQUIRE_MOUNT HOMESTOCK_SYNC_PHOTOS; do
       value="$(kv_get "$legacy_env" "$key")"
       [[ -z "$value" ]] || echo "$key=$value"
     done
@@ -185,6 +196,18 @@ else
   if ! $proxies_given && ! $assume_yes && [[ -r /dev/tty ]]; then
     ask proxy_answer "Reverse proxy address(es) doing TLS offloading, space-separated (blank for none)" ""
     read -r -a opt_proxies <<<"$proxy_answer"
+  fi
+  if [[ -z "$opt_nas" ]] && ! $assume_yes && [[ -r /dev/tty ]]; then
+    nas_answer="" nas_dir=""
+    echo "Homestock backs up its database to $data_dir/staging. It can copy the backups to a NAS:"
+    echo "  none, mount (a folder already mounted from the NAS) or rclone (mount an SMB share for you)"
+    ask nas_answer "Copy backups to a NAS?" none
+    case "$nas_answer" in
+      none|n|"") ;;
+      mount|m) ask nas_dir "Mounted NAS folder" ""; opt_nas="mount $nas_dir" ;;
+      rclone|r) opt_nas=rclone ;;
+      *) die "answer none, mount or rclone" ;;
+    esac
   fi
   valid_hostname "$host_name" || die "invalid hostname: $host_name"
   valid_port "$port" || die "invalid port: $port"
@@ -217,6 +240,15 @@ uid="$(kv_get "$conf" HOMESTOCK_UID)"; uid="${uid:-$APP_UID}"
 gid="$(kv_get "$conf" HOMESTOCK_GID)"; gid="${gid:-$APP_GID}"
 if ! { valid_path "$data_dir" && valid_path "$certs_dir" && valid_port "$port" && valid_id "$uid" && valid_id "$gid"; }; then
   die "$conf has an invalid value; fix it and re-run"
+fi
+
+# --- the app's user on this host: owns the data, and runs the NAS copy (systemd needs a name) -
+if ! getent group "$gid" >/dev/null; then
+  groupadd --system --gid "$gid" homestock
+fi
+if ! getent passwd "$uid" >/dev/null; then
+  useradd --system --uid "$uid" --gid "$gid" --no-create-home --home-dir /nonexistent \
+    --shell /usr/sbin/nologin homestock
 fi
 
 # --- directories, certificate, config ------------------------------------------------------
@@ -455,6 +487,9 @@ install_tool() { # install_tool SOURCE NAME
 }
 install_tool "$BUNDLE_DIR/install.sh" homestock-upgrade
 install_tool "$BUNDLE_DIR/homestock-admin.sh" homestock-admin
+install_tool "$BUNDLE_DIR/homestock-nas.sh" homestock-nas
+install_tool "$BUNDLE_DIR/homestock-doctor.sh" homestock-doctor
+install -m 0755 "$BUNDLE_DIR/sync-homestock-backups.sh" "$install_dir/sync-homestock-backups.sh"
 
 # A shortcut in the home directory of whoever ran the installer (moving or deleting it is fine).
 owner="${SUDO_USER:-root}"
@@ -466,6 +501,19 @@ if [[ -n "$home" && -d "$home" ]]; then
   else
     warn "$home/homestock_upgrade.sh exists and is not a link; left it alone"
   fi
+fi
+
+# --- copying backups to a NAS: set up when asked, and its units refreshed on every run ------
+has_systemd=false
+if command -v systemctl >/dev/null && [[ -d /run/systemd/system ]]; then has_systemd=true; fi
+nas_args=()
+$assume_yes && nas_args+=(--yes)
+if [[ -n "$(kv_get "$conf" HOMESTOCK_NAS_MODE)" ]] && $has_systemd; then
+  homestock-nas refresh || warn "could not refresh the NAS copy's systemd units"
+elif [[ -n "$opt_nas" ]]; then
+  read -r -a nas_setup <<<"$opt_nas"
+  homestock-nas setup "${nas_setup[@]}" "${nas_args[@]}" \
+    || warn "copying backups to the NAS is not set up yet; fix the above, then: sudo homestock-nas setup ${opt_nas}"
 fi
 
 # --- next steps ----------------------------------------------------------------------------
@@ -486,8 +534,17 @@ cat <<EOF
   Upgrade:   sudo homestock-upgrade   (--check to see if there is a new release;
              ~/homestock_upgrade.sh is a shortcut to it)
   Accounts:  sudo homestock-admin list-users | reset-password NAME | create-admin NAME
+  NAS copy:  sudo homestock-nas setup mount DIR | setup rclone | confirm | sync | disable
+  Checks:    sudo homestock-doctor
 EOF
 if $fresh; then
   echo
   echo "  Next: open the address above and create the household admin on the setup screen."
+fi
+
+# Last, so anything that still needs doing (such as enabling FUSE) is what is left on screen.
+echo
+if ! homestock-doctor; then
+  echo
+  warn "Homestock is installed, but the checks above need attention: follow the → steps, then run sudo homestock-doctor"
 fi
