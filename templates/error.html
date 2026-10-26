@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Something went wrong · Homestock</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script>
+    document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  </script>
+</head>
+<body class="min-h-dvh bg-bg text-ink font-sans grid place-items-center p-4">
+  <main class="w-full max-w-[400px] flex flex-col gap-5 text-center">
+    <p role="alert" class="rounded-xl bg-gone-soft p-3 text-gone">{{ message }}</p>
+    <div class="flex justify-center gap-2">
+      <button type="button" onclick="history.back()" class="h-11 px-4 rounded-btn border border-line-strong bg-surface font-medium whitespace-nowrap">Go back</button>
+      <a href="/loc" class="h-11 px-4.5 rounded-btn bg-accent text-accent-fg font-semibold whitespace-nowrap grid place-items-center">All locations</a>
+    </div>
+  </main>
+</body>
+</html>

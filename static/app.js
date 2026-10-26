@@ -15,6 +15,34 @@ document.addEventListener('keydown', e => {
   if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) { e.preventDefault(); location.href = '/search'; }
 });
 
+// Errors: htmx 2 skips 4xx/5xx swaps by default; let the server's toast (HX-Retarget: #toast) through.
+document.addEventListener('htmx:beforeSwap', e => {
+  if (e.detail.xhr.status >= 400 && e.detail.xhr.getResponseHeader('HX-Retarget') === '#toast') {
+    e.detail.shouldSwap = true; e.detail.isError = false;
+  }
+});
+
+// Toasts: show a flash left by a failed form post, and clear any toast after a few seconds.
+function showToast(message) {
+  const t = Object.assign(document.createElement('div'), { className: 'toast toast-error', textContent: message });
+  t.setAttribute('role', 'alert');
+  document.getElementById('toast')?.replaceChildren(t);
+}
+let toastTimer;
+function watchToasts() {
+  const box = document.getElementById('toast'); if (!box) return;
+  new MutationObserver(() => {
+    clearTimeout(toastTimer);
+    if (box.childElementCount) toastTimer = setTimeout(() => box.replaceChildren(), 4000);
+  }).observe(box, { childList: true });
+  const flash = document.cookie.split('; ').find(c => c.startsWith('hs_flash='));
+  if (flash) {
+    document.cookie = 'hs_flash=; Path=/; Max-Age=0; SameSite=Lax';
+    try { showToast(decodeURIComponent(flash.slice('hs_flash='.length))); } catch {}
+  }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchToasts); else watchToasts();
+
 // Theme
 function htmlTheme() { return document.documentElement.dataset.theme; }
 function flipTheme() { document.documentElement.dataset.theme = htmlTheme() === 'dark' ? 'light' : 'dark'; }
@@ -40,9 +68,11 @@ document.addEventListener('dragleave', e => { const t = e.target.closest('[data-
 document.addEventListener('drop', e => {
   const t = e.target.closest('[data-drop-loc]'); if (!t || !drag) return; e.preventDefault();
   const current = document.getElementById('contents')?.dataset.currentLoc;
-  const scope = new URLSearchParams(location.search).get('scope') || 'level';
+  const scope = new URLSearchParams(location.search).get('scope');   // absent → server uses the saved preference
   const url = drag.kind === 'loc' ? `/loc/${drag.id}/move` : `/items/${drag.id}/move`;
-  const values = drag.kind === 'loc' ? { parent: t.dataset.dropLoc, current, scope } : { location_id: t.dataset.dropLoc, current, scope };
+  const values = drag.kind === 'loc' ? { parent: t.dataset.dropLoc } : { location_id: t.dataset.dropLoc };
+  if (current) values.current = current;
+  if (scope) values.scope = scope;
   htmx.ajax('POST', url, { values, target: '#contents', swap: 'innerHTML' }).then(() => htmx.trigger(document.body, 'tree-changed'));
 });
 

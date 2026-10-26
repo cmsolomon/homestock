@@ -66,6 +66,7 @@ pub fn router(state: AppState) -> Router {
         .route("/quick-add", get(quick_add::last))
         .nest_service("/photos", photos)
         .nest_service("/static", ServeDir::new("static"))   // or rust-embed for a single binary
+        .layer(middleware::from_fn(crate::error::present))
         .layer(DefaultBodyLimit::max(25 * 1024 * 1024))     // phone photos
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn_with_state(state.activity.clone(), activity::track))

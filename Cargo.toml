@@ -24,6 +24,9 @@ image       = { version = "0.25", default-features = false, features = ["jpeg", 
 tracing     = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
 [profile.release]
 opt-level     = 3
 lto           = "fat"

@@ -14,6 +14,11 @@ fn nested_for(q: &ScopeQ, cookies: &CookieJar, cookie_name: &str) -> bool {
     scope_preference(q.scope.as_deref(), cookies.get(cookie_name).map(|cookie| cookie.value()))
 }
 
+/// The scope in effect for a request: an explicit `scope`, else the saved preference.
+pub fn nested_scope(scope: Option<&str>, cookies: &CookieJar) -> bool {
+    scope_preference(scope, cookies.get(SCOPE_COOKIE).map(|cookie| cookie.value()))
+}
+
 fn scope_preference(scope: Option<&str>, saved: Option<&str>) -> bool {
     match scope {
         Some("nested") => true,
@@ -137,6 +142,11 @@ async fn load(st: &AppState, id: i64, nested: bool) -> Result<Loaded, AppError> 
         }).collect();
         Ok(Loaded { title: loc.name, kind: loc.kind, meta, crumbs: path.into_iter().map(|(id, name)| Crumb { id, name }).collect(), boxes, item_groups })
     }).await
+}
+
+/// The #contents body of location `id` plus OOB meta/scope updates; the reply to a drag & drop.
+pub async fn contents_html(st: &AppState, id: i64, nested: bool) -> Result<String, AppError> {
+    render_contents(load(st, id, nested).await?, id, nested)
 }
 
 pub async fn contents_oob(st: &AppState, id: i64, nested: bool) -> Result<String, AppError> {
@@ -282,7 +292,7 @@ pub struct MoveForm { pub parent: String, pub current: Option<i64>, pub scope: O
 
 /// Drag & drop and the Move… sheet both post here. Re-renders #contents of the page the
 /// user is on (`current`) and pushes a toast out-of-band.
-pub async fn move_box(State(st): State<AppState>, _u: CurrentUser, headers: HeaderMap, Path(id): Path<i64>, Form(f): Form<MoveForm>) -> Result<Response, AppError> {
+pub async fn move_box(State(st): State<AppState>, _u: CurrentUser, headers: HeaderMap, cookies: CookieJar, Path(id): Path<i64>, Form(f): Form<MoveForm>) -> Result<Response, AppError> {
     let parent = if f.parent == "root" { None } else { Some(f.parent.parse::<i64>().map_err(|_| AppError::bad("Bad destination"))?) };
     let (moved, name, dest) = st.db.call(move |c| {
         let n = locations::move_location(c, id, parent)?;
@@ -302,9 +312,8 @@ pub async fn move_box(State(st): State<AppState>, _u: CurrentUser, headers: Head
         return Ok(Redirect::to(&target).into_response());
     }
     let current = f.current.unwrap_or(id);
-    let nested = f.scope.as_deref() != Some("level");
-    let l = load(&st, current, nested).await?;
-    let body = render_contents(l, current, nested)? + &toast;
+    let nested = nested_scope(f.scope.as_deref(), &cookies);
+    let body = contents_html(&st, current, nested).await? + &toast;
     Ok(Html(body).into_response())
 }
 

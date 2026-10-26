@@ -1,6 +1,7 @@
-use crate::{auth::CurrentUser, error::AppError, repo::{items, locations}, AppState};
+use crate::{auth::CurrentUser, error::{html_escape, AppError}, repo::{items, locations}, routes::locations as location_routes, AppState};
 use askama::Template;
 use axum::{extract::{Form, Path, State}, http::HeaderMap, response::{Html, IntoResponse, Redirect, Response}};
+use axum_extra::extract::CookieJar;
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 
@@ -134,11 +135,22 @@ pub async fn consume_dialog(
 }
 
 #[derive(Deserialize)]
-pub struct MoveForm { location_id: i64, qty: Option<i64> }
+pub struct MoveForm { location_id: i64, qty: Option<i64>, current: Option<i64>, scope: Option<String> }
 
-pub async fn move_item(State(st): State<AppState>, _user: CurrentUser, Path(id): Path<i64>, Form(f): Form<MoveForm>) -> Result<Redirect, AppError> {
-    st.db.call(move |c| crate::repo::items::move_item(c,id,f.location_id,f.qty)).await?;
-    Ok(Redirect::to(&format!("/loc/{}",f.location_id)))
+/// The item sheet posts a plain form (→ destination page). Drag & drop posts via HTMX and
+/// gets the #contents of the page the user is on (`current`) plus a toast, like `move_box`.
+pub async fn move_item(State(st): State<AppState>, _user: CurrentUser, headers: HeaderMap, cookies: CookieJar, Path(id): Path<i64>, Form(f): Form<MoveForm>) -> Result<Response, AppError> {
+    let to = f.location_id;
+    let (name, dest) = st.db.call(move |c| {
+        let moved = items::move_item(c, id, to, f.qty)?;
+        let name: String = c.query_row("SELECT name FROM item WHERE id=?1", [moved], |r| r.get(0))?;
+        Ok((name, locations::get(c, to)?.name))
+    }).await?;
+    if !crate::routes::is_htmx(&headers) { return Ok(Redirect::to(&format!("/loc/{to}")).into_response()); }
+    let nested = location_routes::nested_scope(f.scope.as_deref(), &cookies);
+    let toast = format!(r#"<div id="toast" hx-swap-oob="innerHTML"><div role="status" class="toast">Moved {} to {}</div></div>"#,
+        html_escape(&name), html_escape(&dest));
+    Ok(Html(location_routes::contents_html(&st, f.current.unwrap_or(to), nested).await? + &toast).into_response())
 }
 
 #[derive(Deserialize)]
