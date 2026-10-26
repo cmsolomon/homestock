@@ -137,6 +137,10 @@ sudo homestock-nas confirm
 
 It shows you what's mounted there and what's in it, and writes the marker only when you say yes.
 
+`--yes` answers that question for you, for example in a scripted install with
+`install.sh --yes --nas-dir DIR`. The marker is then written without anyone looking, so use
+`--yes` only when you know the share is mounted.
+
 ### Day to day
 
 ```sh
