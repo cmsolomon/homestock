@@ -373,7 +373,7 @@ Do **not** run `docker compose down -v`, remove `/srv/homestock/data`, or change
 - [Docker releases and deployment overview](./README.md)
 - [Compose file](./docker-compose.yml)
 - [Homestock configuration example](./config.example.toml)
-- [GHCR publishing workflow](../.github/workflows/publish-container.yml)
+- [Release workflow](../.github/workflows/release.yml)
 - [Proxmox VE documentation](https://pve.proxmox.com/pve-docs/)
 - [Docker Engine on Debian](https://docs.docker.com/engine/install/debian/)
 - [rclone SMB backend](https://rclone.org/smb/)

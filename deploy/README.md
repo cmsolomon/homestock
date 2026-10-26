@@ -1,18 +1,28 @@
 # Homestock Docker release
 
-Homestock runs as an offline Docker image. Build a release on a machine with Docker for the same CPU architecture as the Proxmox LXC:
+Homestock runs as an offline Docker image published to GitHub Container Registry for `linux/amd64` and `linux/arm64`.
 
 For a full Proxmox VE 9 setup guide covering an unprivileged LXC, Docker Compose, an SMB share mounted inside the LXC with rclone, permissions, HTTPS, backups, and upgrades, see [PROXMOX-LXC.md](./PROXMOX-LXC.md).
 
+## Releases
+
+Publishing a GitHub release with a semantic version tag such as `v1.2.3` runs the `Release` workflow (`.github/workflows/release.yml`). It:
+
+- builds the image natively for amd64 and arm64 and pushes one multi-arch image to `ghcr.io/<owner>/<repository>`, tagged `1.2.3`, `1.2`, `1` and with the commit SHA;
+- signs the image with keyless cosign (Sigstore, using the workflow's GitHub identity; no keys to manage);
+- attaches signed install files to the release: `homestock-deploy-1.2.3.tar.gz` (this directory plus `release.env`, which pins the image by digest), the `install.sh` bootstrap, `SHA256SUMS`, and a `.sigstore.json` signature bundle for each.
+
+The workflow uses the repository's `GITHUB_TOKEN`; no secrets are needed. Make the GHCR package public in GitHub's package settings so installs can pull without logging in. A manual workflow run publishes and signs a commit-SHA image tag only. To build the install files locally, run `scripts/package-release.sh VERSION IMAGE@sha256:DIGEST OUTDIR`.
+
+To verify an image by hand:
+
 ```sh
-./release.sh 0.2.0
+cosign verify ghcr.io/<owner>/<repository>:1.2.3 \
+  --certificate-identity https://github.com/<owner>/<repository>/.github/workflows/release.yml@refs/tags/v1.2.3 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-## Publish to GitHub Container Registry
-
-The `Publish container` GitHub Actions workflow builds the Docker image and pushes it to `ghcr.io/<owner>/<repository>` when a GitHub release is published. It publishes version tags (for example `1.2.3`, `1.2`, and `1`) and a commit-SHA tag. To publish, create and publish a GitHub release with a semantic version tag such as `v1.2.3`; the workflow uses the repository's `GITHUB_TOKEN`, so no registry secret is needed. A manual workflow run is also available and publishes the commit-SHA tag.
-
-To use the published image from the Proxmox LXC, set `HOMESTOCK_IMAGE=ghcr.io/<owner>/<repository>:<version>` in `.env`; install and upgrade will pull it when `homestock-image.tar` is absent. Set the package visibility to public in GitHub's package settings for unauthenticated pulls; for a private package, log Docker in to `ghcr.io` in the LXC with a token that has `read:packages`. Leave the default `homestock:release` value to use the offline image tarball in a release bundle.
+To use the published image, set `HOMESTOCK_IMAGE=ghcr.io/<owner>/<repository>:<version>` in `.env`.
 
 Prepare a Debian-based LXC with Docker Engine and the Docker Compose plugin installed. If it is unprivileged, enable Proxmox `nesting` and `keyctl` for Docker; enable `fuse` as well if mounting an SMB share inside the LXC with rclone. Transfer `dist/homestock-0.2.0.tar.gz` into the LXC and extract it into `/opt/homestock` (the per-app backup timer uses this path). On the LXC:
 
