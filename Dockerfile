@@ -1,4 +1,4 @@
-FROM rust:1-bookworm AS builder
+FROM rust:1-trixie AS builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
@@ -6,7 +6,7 @@ COPY migrations ./migrations
 COPY templates ./templates
 RUN cargo build --release --locked
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 RUN useradd --system --uid 10001 --no-create-home homestock
 WORKDIR /opt/homestock
 COPY --from=builder /build/target/release/homestock /usr/local/bin/homestock
