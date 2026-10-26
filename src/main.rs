@@ -85,5 +85,5 @@ async fn shutdown_signal() -> std::io::Result<()> {
     }
 }
 
-/// Tiny boxed-error alias so the starter has no `anyhow` dependency. Swap for `anyhow` if preferred.
+/// Tiny boxed-error alias for `main`, avoiding an `anyhow` dependency.
 mod anyhow_free { pub type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>; }

@@ -2,7 +2,7 @@
 
 This file adds the owner's implementation plan to the design spec in `README.md`. If the two disagree on **behaviour or UI**, `README.md` wins. This file decides **stack, schema, structure and operations**.
 
-Runnable-shaped starter code is in `starter/`. It has not been compiled. It shows the intended structure and the trickiest logic, and Copilot should build out from it.
+The implementation lives at the repository root (`src/`, `migrations/`, `templates/`, `static/`, `styles/`). Section references below point at the files that implement each part.
 
 ---
 
@@ -83,7 +83,7 @@ homestock/
 
 ## 3. Schema
 
-The full SQL is in `starter/migrations/0001_init.sql`. Decisions:
+The full SQL is in `migrations/` (`0001_init.sql` onward). Decisions:
 
 - **Adjacency list + recursive CTE** rather than a closure table. A household has hundreds to low thousands of locations, and a recursive CTE over an indexed `parent_id` returns in microseconds. Moving a box (with everything inside) is then a **single-row UPDATE**. With a closure table it would mean rewriting every ancestor/descendant pair. Cycles are rejected in the move transaction.
 - Time is stored as unix seconds (`INTEGER`, `unixepoch()`), so no date crate is needed in queries.
@@ -93,7 +93,7 @@ The full SQL is in `starter/migrations/0001_init.sql`. Decisions:
 - `user.theme` (`light|dark|system`) is persisted **per user**. `user.last_location_id` is the remembered Quick-add box.
 - `item_fts` is a trigram FTS5 table maintained by **app code** (SQLite triggers cannot run the recursive CTE needed for `path`). Call `reindex(items)` after every item write and after moving a box (reindex its subtree).
 
-## 4. Core logic (see `starter/src/repo/*.rs`)
+## 4. Core logic (see `src/repo/*.rs`)
 
 - `subtree_ids(loc)` / `path(loc)`: recursive CTEs.
 - `child_box_stats(parent)`: one CTE returns, for each child box, its recursive item count and box count (feeds “4 items · 1 box” and variant-B tiles).
@@ -105,7 +105,7 @@ The full SQL is in `starter/migrations/0001_init.sql`. Decisions:
 - `consume(item | checkout, qty, add_to_list)`: `qty = max(0, qty − n)`; `INSERT OR IGNORE` into `shop` (partial unique index = one open entry per item).
 - `restock(shop_id, to?)`: linked → `qty += n`; unlinked → create/merge at `to`.
 
-## 5. Fuzzy search (see `starter/src/search.rs`)
+## 5. Fuzzy search (see `src/search.rs`)
 
 1. Tokenise the query (lowercase, split on whitespace, strip `#`).
 2. **Candidates:** for tokens ≥ 3 chars, OR together their trigrams in an FTS5 MATCH (`"bat" OR "ate" OR "ter" …`), limit 400. For shorter tokens, use `LIKE '%x%'` on `name`/`tags` (fast at this size). For an empty query with filters, all items.
@@ -113,7 +113,7 @@ The full SQL is in `starter/migrations/0001_init.sql`. Decisions:
 4. Apply tag and status filters (`in_use`, `low`, `used`) in SQL on the candidate join.
 5. HTMX: `hx-get="/search/results" hx-trigger="input changed delay:300ms, search" hx-indicator="#search-skeleton"`.
 
-## 6. Backups (see `starter/src/backup.rs`)
+## 6. Backups (see `src/backup.rs`)
 
 - `activity.rs` middleware stores the timestamp of the last request in an `AtomicU64`.
 - The backup task keeps its **own read connection** and polls `PRAGMA data_version`. That value changes whenever *another* connection commits, so it is a free “dirty” flag with no app bookkeeping.

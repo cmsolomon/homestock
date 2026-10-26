@@ -1,9 +1,0 @@
-<li class="flex items-center gap-2.5 rounded-btn bg-surface-2 py-1.5 pl-2 pr-1.5">
-  <span class="relative size-9 shrink-0 overflow-hidden rounded-[10px] placeholder-stripes">
-    {% if let Some(p) = photo %}<img src="/{{ p }}" alt="" class="absolute inset-0 size-full object-cover">{% endif %}
-  </span>
-  <span class="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{{ name }}</span>
-  <span class="text-[12.5px] tabular-nums text-ink-2">{{ qty_label }}</span>
-  <button hx-delete="/items/{{ id }}" hx-target="closest li" hx-swap="outerHTML"
-          class="h-9 px-2.5 rounded-[10px] text-[13px] font-semibold text-accent">Undo</button>
-</li>
