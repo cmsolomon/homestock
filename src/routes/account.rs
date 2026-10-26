@@ -1,18 +1,18 @@
 use crate::{
     auth::{self, CurrentUser, COOKIE},
     error::AppError,
+    security::ClientIp,
     AppState,
 };
 use askama::Template;
 use axum::{
-    extract::{ConnectInfo, Form, State},
+    extract::{Form, State},
     http::{header, HeaderValue},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::CookieJar;
 use rusqlite::params;
 use serde::Deserialize;
-use std::net::SocketAddr;
 
 #[derive(Template)]
 #[template(path = "account.html")]
@@ -56,12 +56,11 @@ pub struct PasswordForm {
 pub async fn change_password(
     State(st): State<AppState>,
     user: CurrentUser,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     jar: CookieJar,
     Form(f): Form<PasswordForm>,
 ) -> Result<Redirect, AppError> {
     auth::validate_new_password(&f.next, &f.confirm)?;
-    let ip = peer.ip();
     if !st.passwords.allowed(ip) {
         return Err(AppError::TooManyAttempts);
     }

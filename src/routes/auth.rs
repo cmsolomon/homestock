@@ -1,18 +1,18 @@
 use crate::{
     auth::{self, COOKIE},
     error::{AppError, TOO_MANY_ATTEMPTS},
+    security::ClientIp,
     AppState,
 };
 use askama::Template;
 use axum::{
-    extract::{ConnectInfo, Form, State},
+    extract::{Form, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::CookieJar;
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
-use std::net::SocketAddr;
 
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -80,10 +80,9 @@ const WRONG_PASSWORD: &str = "That password doesn’t match. Try again or ask an
 
 pub async fn login(
     State(st): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ClientIp(ip): ClientIp,
     Form(f): Form<Credentials>,
 ) -> Result<Response, AppError> {
-    let ip = peer.ip();
     if !st.passwords.allowed(ip) {
         return Ok((
             StatusCode::TOO_MANY_REQUESTS,

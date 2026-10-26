@@ -18,6 +18,9 @@ pub struct Config {
     pub backup: BackupConfig,
     #[serde(default)]
     pub seed_users: Vec<SeedUser>,
+    /// Reverse proxies (e.g. HAProxy) whose X-Forwarded-For is trusted for the client address.
+    #[serde(default)]
+    pub trusted_proxies: Vec<std::net::IpAddr>,
 }
 fn d30() -> i64 {
     30
@@ -140,5 +143,29 @@ mod tests {
         assert!(config.tls_cert.is_none());
         assert!(config.tls_key.is_none());
         assert_eq!(config.backup.pending_keep, 3);
+    }
+
+    #[test]
+    fn trusted_proxies_are_parsed_and_invalid_addresses_rejected() {
+        let base = "bind = \"0.0.0.0:8443\"\ndata_dir = \"/data\"\n[backup]\n";
+        let config: Config = toml::from_str(&format!(
+            "trusted_proxies = [\"10.0.10.1\", \"fd00::1\"]\n{base}"
+        ))
+        .expect("parse trusted proxies");
+        assert_eq!(
+            config.trusted_proxies,
+            [
+                "10.0.10.1".parse::<std::net::IpAddr>().unwrap(),
+                "fd00::1".parse().unwrap()
+            ]
+        );
+        assert!(toml::from_str::<Config>(base)
+            .expect("parse without proxies")
+            .trusted_proxies
+            .is_empty());
+        assert!(
+            toml::from_str::<Config>(&format!("trusted_proxies = [\"opnsense.lan\"]\n{base}"))
+                .is_err()
+        );
     }
 }

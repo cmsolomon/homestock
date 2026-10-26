@@ -1,13 +1,15 @@
-//! Request hardening: failed-password throttling and a cross-site request check.
+//! Request hardening: failed-password throttling, client addresses behind a trusted
+//! proxy, and a cross-site request check.
+use crate::{error::AppError, AppState};
 use axum::{
-    extract::Request,
-    http::{header, HeaderMap, Method, StatusCode},
+    extract::{ConnectInfo, FromRef, FromRequestParts, Request},
+    http::{header, request::Parts, HeaderMap, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use std::{
     collections::HashMap,
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -52,6 +54,52 @@ impl PasswordLimiter {
         }
         map.entry(ip).or_default().push(now);
     }
+}
+
+/// The address a request came from, for per-client limits. Behind a reverse proxy listed in
+/// `trusted_proxies` (e.g. HAProxy on OPNsense with X-Forwarded-For enabled) every connection
+/// comes from the proxy, so use the address it appended instead.
+pub struct ClientIp(pub IpAddr);
+
+impl<S> FromRequestParts<S> for ClientIp
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let st = AppState::from_ref(state);
+        let ConnectInfo(peer) = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .ok_or_else(|| AppError::internal("connection info is not available"))?;
+        Ok(ClientIp(client_ip(
+            peer.ip(),
+            &parts.headers,
+            &st.cfg.trusted_proxies,
+        )))
+    }
+}
+
+/// Only the last X-Forwarded-For entry is used: the proxy appends the address it saw, and
+/// anything before it was sent by the client and can be forged. A request that did not come
+/// from a trusted proxy keeps its own peer address, whatever headers it carries.
+fn client_ip(peer: IpAddr, headers: &HeaderMap, trusted_proxies: &[IpAddr]) -> IpAddr {
+    let peer = peer.to_canonical();
+    if !trusted_proxies
+        .iter()
+        .any(|proxy| proxy.to_canonical() == peer)
+    {
+        return peer;
+    }
+    headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .last()
+        .and_then(|entry| entry.trim().parse::<IpAddr>().ok())
+        .map_or(peer, |ip| ip.to_canonical())
 }
 
 /// Reject state-changing requests started by another site. SameSite=Lax cookies already stop
@@ -145,6 +193,46 @@ mod tests {
         assert!(
             is_same_origin(&HeaderMap::new(), None),
             "non-browser clients send neither header"
+        );
+    }
+
+    #[test]
+    fn client_ip_uses_the_proxy_appended_address_only_from_trusted_proxies() {
+        let proxy: IpAddr = "10.0.10.1".parse().expect("ip");
+        let phone: IpAddr = "10.0.20.7".parse().expect("ip");
+        let trusted = [proxy];
+        // The client forged the first entry; HAProxy appended the real one.
+        let forwarded = headers(&[("x-forwarded-for", "1.2.3.4, 10.0.20.7")]);
+        assert_eq!(client_ip(proxy, &forwarded, &trusted), phone);
+        assert_eq!(
+            client_ip(phone, &forwarded, &trusted),
+            phone,
+            "untrusted peers can't pick their address"
+        );
+        assert_eq!(
+            client_ip(proxy, &forwarded, &[]),
+            proxy,
+            "no proxies configured"
+        );
+
+        let mut separate_lines = headers(&[("x-forwarded-for", "1.2.3.4")]);
+        separate_lines.append("x-forwarded-for", HeaderValue::from_static("10.0.20.7"));
+        assert_eq!(client_ip(proxy, &separate_lines, &trusted), phone);
+
+        assert_eq!(
+            client_ip(proxy, &HeaderMap::new(), &trusted),
+            proxy,
+            "header missing"
+        );
+        assert_eq!(
+            client_ip(proxy, &headers(&[("x-forwarded-for", "unknown")]), &trusted),
+            proxy
+        );
+        let mapped: IpAddr = "::ffff:10.0.10.1".parse().expect("ip");
+        assert_eq!(
+            client_ip(mapped, &forwarded, &trusted),
+            phone,
+            "IPv4-mapped proxy address"
         );
     }
 
