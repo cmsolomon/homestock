@@ -26,11 +26,6 @@ pub async fn page(State(st): State<AppState>, user: CurrentUser) -> Result<Html<
     Ok(Html(HouseholdPage{user,members}.render()?))
 }
 
-fn temp_password() -> String {
-    const WORDS:&[&str]=&["maple","river","cedar","meadow","harbor","copper","willow","morning","silver","garden","cabin","cloud"];
-    format!("{}-{}-{:02}",WORDS[rand::random_range(0..WORDS.len())],WORDS[rand::random_range(0..WORDS.len())],rand::random_range(10..100))
-}
-
 #[derive(Template)]
 #[template(path = "_reset_password_result.html")]
 pub struct ResetPasswordResult { pub name:String, pub password:String }
@@ -50,7 +45,7 @@ pub async fn create(State(st):State<AppState>, _admin:AdminUser, Form(f):Form<Ad
     let name=f.name.trim().to_owned();
     if name.is_empty() || name.len()>60 { return Err(AppError::bad("Enter a name up to 60 characters long")); }
     if !["admin","member"].contains(&f.role.as_str()) { return Err(AppError::bad("Choose a valid role")); }
-    let password=temp_password();
+    let password=auth::temp_password();
     let password_hash=password.clone();
     let password_hash=tokio::task::spawn_blocking(move||auth::hash(&password_hash)).await.map_err(|e|AppError::internal(e.to_string()))??;
     let saved_name=name.clone();
@@ -64,7 +59,7 @@ pub async fn create(State(st):State<AppState>, _admin:AdminUser, Form(f):Form<Ad
 
 pub async fn reset(State(st):State<AppState>,admin:AdminUser,Path(id):Path<i64>)->Result<Html<String>,AppError>{
     if id==admin.0.id { return Err(AppError::bad("You can’t reset your own password here")); }
-    let password=temp_password();
+    let password=auth::temp_password();
     let pw=password.clone();
     let hash=tokio::task::spawn_blocking(move||auth::hash(&pw)).await.map_err(|e|AppError::internal(e.to_string()))??;
     let name=st.db.call(move|c|set_temporary_password(c,id,&hash)).await?;
@@ -92,9 +87,7 @@ pub struct PasswordForm { password:String, confirm_password:String }
 
 pub async fn change_password(State(st):State<AppState>,admin:AdminUser,Path(id):Path<i64>,Form(f):Form<PasswordForm>)->Result<Redirect,AppError>{
     if id==admin.0.id{return Err(AppError::bad("Use Account settings to change your own password"));}
-    if f.password.len()<12{return Err(AppError::bad("Passwords must be at least 12 characters long"));}
-    if f.password.len()>1024{return Err(AppError::bad("Passwords must be 1024 characters or fewer"));}
-    if f.password!=f.confirm_password{return Err(AppError::bad("The passwords do not match"));}
+    auth::validate_new_password(&f.password,&f.confirm_password)?;
     let password=f.password;
     let password_hash=tokio::task::spawn_blocking(move||auth::hash(&password)).await.map_err(|e|AppError::internal(e.to_string()))??;
     st.db.call(move|c|set_password(c,id,&password_hash)).await?;

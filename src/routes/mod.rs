@@ -1,6 +1,7 @@
 use crate::{activity, AppState};
 use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
-use tower_http::{compression::CompressionLayer, services::ServeDir};
+use axum::http::{header, HeaderValue};
+use tower_http::{compression::CompressionLayer, services::ServeDir, set_header::SetResponseHeaderLayer};
 
 pub mod locations;
 pub mod quick_add;
@@ -11,7 +12,6 @@ pub mod shopping;
 pub mod export;
 pub mod account;
 pub mod users;
-// pub mod items; pub mod checkouts; pub mod shopping; pub mod search; pub mod users; pub mod account; pub mod export;
 
 pub fn router(state: AppState) -> Router {
     let photos = ServeDir::new(state.cfg.data_dir.join("photos"));
@@ -62,12 +62,17 @@ pub fn router(state: AppState) -> Router {
         .route("/checkouts/{id}/reassign", post(items::reassign))
         .route("/checkouts/{id}/put-away", post(items::put_away))
         .route("/checkouts/{id}/consume", post(items::consume_checkout))
-        .route("/loc/{id}/quick-add", get(quick_add::sheet).post(quick_add::create))
+        .route("/loc/{id}/quick-add", get(quick_add::sheet).post(quick_add::create).layer(DefaultBodyLimit::max(25 * 1024 * 1024)))   // phone photos
         .route("/quick-add", get(quick_add::last))
         .nest_service("/photos", photos)
         .nest_service("/static", ServeDir::new("static"))   // or rust-embed for a single binary
         .layer(middleware::from_fn(crate::error::present))
-        .layer(DefaultBodyLimit::max(25 * 1024 * 1024))     // phone photos
+        .layer(DefaultBodyLimit::max(64 * 1024))            // forms; quick-add raises its own
+        .layer(middleware::from_fn(crate::security::same_origin))
+        .layer(SetResponseHeaderLayer::if_not_present(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn_with_state(state.activity.clone(), activity::track))
         .with_state(state)

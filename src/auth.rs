@@ -18,6 +18,33 @@ pub fn verify(pw: &str, stored: &str) -> bool {
     PasswordHash::new(stored).map(|h| Argon2::default().verify_password(pw.as_bytes(), &h).is_ok()).unwrap_or(false)
 }
 
+/// Longest password accepted anywhere, checked before argon2 runs.
+pub const MAX_PASSWORD_LEN: usize = 1024;
+
+/// The one rule for passwords people choose (setup, Account, admin-set).
+pub fn validate_new_password(pw: &str, confirm: &str) -> Result<(), AppError> {
+    if pw.chars().count() < 8 { return Err(AppError::bad("Password needs at least 8 characters.")); }
+    if pw.len() > MAX_PASSWORD_LEN { return Err(AppError::bad("Password must be 1024 characters or fewer.")); }
+    if pw != confirm { return Err(AppError::bad("The two passwords don’t match.")); }
+    Ok(())
+}
+
+/// Admin-issued temporary password, easy to read aloud: three words and two digits
+/// (64³ × 90 ≈ 23.6 million combinations, and it must be changed at first sign-in).
+pub fn temp_password() -> String {
+    const WORDS: &[&str] = &[
+        "maple", "river", "cedar", "meadow", "harbor", "copper", "willow", "morning",
+        "silver", "garden", "cabin", "cloud", "amber", "anchor", "apple", "aspen",
+        "badger", "basil", "beacon", "birch", "bramble", "breeze", "brook", "candle",
+        "canyon", "clover", "comet", "coral", "cotton", "crane", "daisy", "delta",
+        "ember", "falcon", "fern", "fjord", "forest", "frost", "glacier", "granite",
+        "hazel", "heron", "island", "ivory", "jasper", "juniper", "lantern", "lemon",
+        "linen", "lotus", "marble", "meteor", "nectar", "oak", "olive", "orchid",
+        "otter", "pebble", "pepper", "pine", "prairie", "quartz", "raven", "saffron",
+    ];
+    let word = || WORDS[rand::random_range(0..WORDS.len())];
+    format!("{}-{}-{}-{:02}", word(), word(), word(), rand::random_range(10..100))
+}
 
 /// Only when the user table is empty. Seeded accounts must change their password.
 pub fn seed_users(c: &mut Connection, seeds: &[SeedUser]) -> Result<(), AppError> {

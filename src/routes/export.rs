@@ -34,11 +34,17 @@ fn build_csv(c: &rusqlite::Connection, location_id: Option<i64>) -> Result<Vec<u
         .map_err(|e|AppError::internal(e.to_string()))?;
     for row in rows {
         writer.write_record([
-            row.0.to_string(),row.1,row.2.to_string(),row.3,row.4.to_string(),row.5.to_string(),
-            row.6,locations::path_text(c,row.7)?,row.8,
+            row.0.to_string(),cell(row.1),row.2.to_string(),cell(row.3),row.4.to_string(),row.5.to_string(),
+            cell(row.6),cell(locations::path_text(c,row.7)?),cell(row.8),
         ]).map_err(|e|AppError::internal(e.to_string()))?;
     }
     writer.into_inner().map_err(|e|AppError::internal(e.to_string()))
+}
+
+/// Text cells starting with a formula character get a leading `'` so spreadsheet apps
+/// show them as text instead of evaluating them (CSV formula injection).
+fn cell(text: String) -> String {
+    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) { format!("'{text}") } else { text }
 }
 
 pub async fn csv(
@@ -97,6 +103,17 @@ mod tests {
         assert_eq!(&rows[0][7], "Garage");
         assert_eq!(&rows[1][1], "Wrench");
         assert_eq!(&rows[1][7], "Garage › Tool chest");
+    }
+
+    #[test]
+    fn formula_like_text_is_exported_as_text() {
+        let c = database();
+        c.execute("UPDATE item SET name='=HYPERLINK(\"http://x\")' WHERE id=1", []).expect("rename item");
+        let bytes = build_csv(&c, Some(1)).expect("build export");
+        let mut reader = csv::Reader::from_reader(bytes.as_slice());
+        let rows = reader.records().collect::<Result<Vec<_>,_>>().expect("read CSV rows");
+        assert_eq!(&rows[0][1], "'=HYPERLINK(\"http://x\")");
+        assert_eq!(&rows[1][1], "Wrench");
     }
 
     #[test]

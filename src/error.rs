@@ -10,6 +10,7 @@ pub enum AppError {
     Unauthorized,
     PasswordChangeRequired,
     Forbidden,
+    TooManyAttempts,
     Internal(String),
 }
 
@@ -21,11 +22,14 @@ impl fmt::Display for AppError {
             Self::Unauthorized => f.write_str("Sign in required"),
             Self::PasswordChangeRequired => f.write_str("Change your password before continuing"),
             Self::Forbidden => f.write_str("Only admins can do that"),
+            Self::TooManyAttempts => f.write_str(TOO_MANY_ATTEMPTS),
         }
     }
 }
 
 impl std::error::Error for AppError {}
+
+pub const TOO_MANY_ATTEMPTS: &str = "Too many wrong passwords. Wait a minute and try again.";
 
 impl AppError {
     pub fn internal(m: impl Into<String>) -> Self { AppError::Internal(m.into()) }
@@ -64,6 +68,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => return redirect("/login"),
             AppError::PasswordChangeRequired => return redirect("/account"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "Only admins can do that".to_string()),
+            AppError::TooManyAttempts => (StatusCode::TOO_MANY_REQUESTS, TOO_MANY_ATTEMPTS.to_string()),
             AppError::Internal(m) => { tracing::error!(%m); (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong — try again".to_string()) }
         };
         let mut h = HeaderMap::new();
