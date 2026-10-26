@@ -71,18 +71,12 @@ impl Config {
             .unwrap_or_else(|| self.data_dir.join("homestock.sqlite3"))
     }
 
-    /// `homestock --config /etc/homestock/config.toml` (default ./config.toml)
-    pub fn load_from_args() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let mut args = std::env::args().skip(1);
-        let mut path = PathBuf::from("config.toml");
-        while let Some(a) = args.next() {
-            if a == "--config" {
-                if let Some(p) = args.next() {
-                    path = p.into();
-                }
-            }
-        }
-        let cfg: Self = toml::from_str(&std::fs::read_to_string(&path)?)?;
+    /// The file passed as `--config` (default ./config.toml).
+    pub fn load(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read config {}: {e}", path.display()))?;
+        let cfg: Self =
+            toml::from_str(&text).map_err(|e| format!("invalid config {}: {e}", path.display()))?;
         if cfg.session_days < 1 {
             return Err("session_days must be at least 1".into());
         }
