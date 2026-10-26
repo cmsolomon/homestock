@@ -12,8 +12,10 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [options]
 
-Installs Homestock with Docker Compose, or re-applies the current release to an existing
-install. Without --yes it asks for anything not given as an option.
+Installs Homestock with Docker Compose, or brings an existing install to this release: it
+stops Homestock, backs up and checks the database, starts the new version, and goes back to
+the old one if the new one doesn't come up. Without --yes it asks for anything not given as
+an option, and before upgrading.
 
 Options:
   --hostname NAME       Name clients use for Homestock (for the certificate and messages)
@@ -26,6 +28,10 @@ Options:
   --image REF           Use this image instead of the release's (for testing)
   -y, --yes             Don't ask: accept defaults and install Docker if it is missing
   -h, --help            Show this help
+
+install.sh and homestock-upgrade also take:
+  --version X.Y.Z       Install this release instead of the latest
+  --check               Show the installed and latest versions, and change nothing
 EOF
 }
 
@@ -195,10 +201,6 @@ else
   } > "$conf.new"
 fi
 
-if [[ -n "$installed_version" && "$installed_version" != "$release_version" && -f "$conf" ]]; then
-  die "Homestock $installed_version is installed; upgrading to $release_version is not supported by this installer"
-fi
-
 if [[ -f "$conf.new" ]]; then
   printf '# Homestock installer settings. .env is generated from this file on every run.\n' > "$conf"
   grep -v '^$' "$conf.new" >> "$conf"
@@ -264,6 +266,149 @@ fi
 chown "root:$gid" "$config"
 chmod 0640 "$config"
 
+# --- the release's image: check its signature and pull it before anything is stopped -------
+if [[ -n "${HOMESTOCK_COSIGN:-}" && -z "$opt_image" ]]; then
+  "$HOMESTOCK_COSIGN" verify "$image" \
+    --certificate-identity "$HOMESTOCK_SIGNER_IDENTITY" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 \
+    || die "the image signature does not match the release workflow; not starting it"
+  say "verified: image signed by the release workflow"
+else
+  warn "image signature not checked (no release verification for $image)"
+fi
+if [[ "$image" == *@sha256:* ]] || ! docker image inspect "$image" >/dev/null 2>&1; then
+  say "pulling $image"
+  docker pull --quiet "$image" >/dev/null || die "could not pull $image"
+fi
+new_id="$(docker image inspect -f '{{.Id}}' "$image")"
+
+compose() { docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" "$@"; }
+
+# Run a one-off homestock command from IMAGE against this install's config and data.
+homestock_tool() {
+  local tool_image="$1"
+  shift
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+    --user "$uid:$gid" -v "$data_dir:/var/lib/homestock" -v "$certs_dir:/etc/homestock/certs:ro" \
+    -v "$config:/etc/homestock/config.toml:ro" "$tool_image" --config /etc/homestock/config.toml "$@"
+}
+
+# A top-level string setting from config.toml (the keys before the first [section]).
+toml_get() {
+  awk -v key="$1" '/^[[:space:]]*\[/ { exit }
+    $0 ~ "^[[:space:]]*" key "[[:space:]]*=" { sub(/^[^=]*=[[:space:]]*"/, ""); sub(/".*$/, ""); value = $0 }
+    END { print value }' "$config"
+}
+
+scheme=https
+[[ -n "$(toml_get tls_cert)" ]] || scheme=http
+
+# Wait for /healthz to answer OK, or with "any" for any HTTP answer: a release from before
+# /healthz existed, when rolling back to it. Gives up early if the container keeps restarting.
+wait_until_up() {
+  local code restarts
+  say "waiting for Homestock to answer on $scheme://127.0.0.1:$port/"
+  for _ in $(seq 1 60); do
+    code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 2 "$scheme://127.0.0.1:$port/healthz" 2>/dev/null || true)"
+    [[ "$code" == 200 ]] && return 0
+    [[ "${1:-}" == any && "$code" =~ ^[1-5][0-9][0-9]$ ]] && return 0
+    restarts="$(docker inspect -f '{{.RestartCount}}' homestock 2>/dev/null || echo 0)"
+    (( restarts < 3 )) || return 1
+    sleep 2
+  done
+  return 1
+}
+
+# --- upgrade safety: stop the old version, back up its database, keep the way back ---------
+# This runs whenever the image changes under an existing database, which includes adopting a
+# hand-made install. The database is copied (and integrity-checked) with Homestock stopped,
+# by the new release's tool, which reads any older schema without migrating it.
+db_path="$(toml_get database_path)"
+cfg_data_dir="$(toml_get data_dir)"
+db_path="${db_path:-${cfg_data_dir:-/var/lib/homestock}/homestock.sqlite3}"
+db_host=""
+[[ "$db_path" != /var/lib/homestock/* ]] || db_host="$data_dir/${db_path#/var/lib/homestock/}"
+old_id="$(docker inspect -f '{{.Image}}' homestock 2>/dev/null || true)"
+old_running="$(docker inspect -f '{{.State.Running}}' homestock 2>/dev/null || true)"
+old_version="${installed_version:-unknown}"
+old_label="Homestock ${installed_version:-(version unknown)}"
+snapshot=""
+
+if [[ "$old_id" != "$new_id" && -n "$db_host" && -f "$db_host" ]]; then
+  new_schema="$(homestock_tool "$image" schema-version)" \
+    || die "Homestock $release_version's image does not run here; nothing was stopped"
+  db_schema="$(homestock_tool "$image" database-version)" \
+    || die "Homestock $release_version cannot read this database (see above); nothing was stopped"
+  [[ "$new_schema" =~ ^[0-9]+$ && "$db_schema" =~ ^[0-9]+$ ]] || die "unexpected schema versions '$new_schema' and '$db_schema'"
+  if (( db_schema > new_schema )); then
+    die "the database is at schema $db_schema, newer than Homestock $release_version supports ($new_schema); install a newer release"
+  fi
+  db_bytes="$(cat -- "$db_host" "$db_host-wal" 2>/dev/null | wc -c)"
+  free_bytes="$(df -B1 --output=avail "$data_dir" | tail -n 1)"
+  if (( free_bytes < db_bytes + 100 * 1024 * 1024 )); then
+    die "not enough free space in $data_dir for the pre-upgrade backup ($db_bytes bytes plus 100 MiB)"
+  fi
+
+  migration=""
+  (( db_schema == new_schema )) || migration=", migrating the database from schema $db_schema to $new_schema"
+  confirm "Upgrade $old_label to $release_version$migration? It is stopped for the upgrade." \
+    || die "not upgraded"
+
+  snapshot_name="$(date -u +%Y%m%dT%H%M%SZ)-v$old_version"
+  snapshot="$data_dir/pre-upgrade/$snapshot_name"
+  install -d -m 0700 -o "$uid" -g "$gid" "$data_dir/pre-upgrade" "$snapshot"
+  if [[ -n "$old_id" ]]; then
+    docker tag "$old_id" homestock-previous:latest  # keeps the old image for a rollback
+    say "stopping $old_label"
+    docker stop -t 45 homestock >/dev/null || die "could not stop Homestock; nothing was changed"
+  fi
+  say "backing up the database to $snapshot"
+  if ! homestock_tool "$image" backup "/var/lib/homestock/pre-upgrade/$snapshot_name/homestock.sqlite3" >/dev/null; then
+    [[ "$old_running" != true ]] || docker start homestock >/dev/null || true
+    die "the pre-upgrade backup failed, so $old_label was left as it was"
+  fi
+  for file in .env docker-compose.yml release.env; do
+    [[ ! -f "$install_dir/$file" ]] || cp -p -- "$install_dir/$file" "$snapshot/$file"
+  done
+  cp -p -- "$config" "$snapshot/config.toml"
+  cat > "$snapshot/manifest" <<EOF
+# Pre-upgrade backup, written by the Homestock installer before switching images. To go back
+# by hand: stop Homestock (docker stop homestock), copy homestock.sqlite3 over the database
+# below and delete its -wal and -shm files, copy .env, docker-compose.yml and release.env back
+# to $install_dir, set HOMESTOCK_IMAGE in .env to the previous image, and start it.
+CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+FROM_VERSION=$old_version
+FROM_IMAGE_ID=$old_id
+TO_VERSION=$release_version
+TO_IMAGE=$image
+SCHEMA_VERSION=$db_schema
+DATABASE=$db_host
+EOF
+  chmod 0600 "$snapshot/manifest"
+  # Compose recreates it from the new files, even if the old one came from another project.
+  [[ -z "$old_id" ]] || docker rm homestock >/dev/null
+fi
+
+# Put the previous version back after a failed upgrade: its files, its image and the database
+# as it was before the upgrade. Exits.
+roll_back() {
+  warn "Homestock $release_version did not start properly; going back to $old_label"
+  compose logs --no-color homestock > "$snapshot/failed-upgrade.log" 2>&1 || true
+  docker stop -t 45 homestock >/dev/null 2>&1 || true
+  docker rm homestock >/dev/null 2>&1 || true
+  install -m 0600 -o "$uid" -g "$gid" "$snapshot/homestock.sqlite3" "$db_host"
+  rm -f -- "$db_host-wal" "$db_host-shm"
+  for file in docker-compose.yml release.env; do
+    if [[ -f "$snapshot/$file" ]]; then cp -p -- "$snapshot/$file" "$install_dir/$file"; else rm -f -- "$install_dir/$file"; fi
+  done
+  { grep -v '^HOMESTOCK_IMAGE=' "$snapshot/.env" 2>/dev/null || true; echo "HOMESTOCK_IMAGE=homestock-previous:latest"; } > "$install_dir/.env"
+  chmod 0600 "$install_dir/.env"
+  if compose up -d >/dev/null 2>&1 && wait_until_up any; then
+    die "the upgrade failed, and $old_label is running again with the database as it was. The new version's log is in $snapshot/failed-upgrade.log"
+  fi
+  die "the upgrade failed and $old_label did not restart either; the pre-upgrade backup and its manifest are in $snapshot"
+}
+
 # --- deployment files and .env -------------------------------------------------------------
 install -m 0644 "$BUNDLE_DIR/docker-compose.yml" "$install_dir/docker-compose.yml"
 install -m 0644 "$BUNDLE_DIR/config.example.toml" "$install_dir/config.example.toml"
@@ -276,40 +421,51 @@ install -m 0644 "$BUNDLE_DIR/config.example.toml" "$install_dir/config.example.t
 chmod 0600 "$install_dir/.env.new"
 mv -f -- "$install_dir/.env.new" "$install_dir/.env"
 
-# --- image: verify the signature, then start ------------------------------------------------
-if [[ -n "${HOMESTOCK_COSIGN:-}" && -z "$opt_image" ]]; then
-  "$HOMESTOCK_COSIGN" verify "$image" \
-    --certificate-identity "$HOMESTOCK_SIGNER_IDENTITY" \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 \
-    || die "the image signature does not match the release workflow; not starting it"
-  say "verified: image signed by the release workflow"
-else
-  warn "image signature not checked (no release verification for $image)"
-fi
-
-compose() { docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" "$@"; }
-if [[ "$image" == *@sha256:* ]] || ! docker image inspect "$image" >/dev/null 2>&1; then
-  say "pulling $image"
-  compose pull --quiet
-fi
+# --- start ---------------------------------------------------------------------------------
 if ! compose up -d --remove-orphans; then
   $in_lxc && warn "in a Proxmox LXC, Docker needs the 'nesting' feature, and 'keyctl' if containers fail to start with a keyring or permission error"
+  [[ -z "$snapshot" || -z "$old_id" ]] || roll_back
   die "docker compose could not start Homestock"
 fi
-
-scheme=https
-grep -Eq '^[[:space:]]*tls_cert[[:space:]]*=' "$config" || scheme=http
-say "waiting for Homestock to answer on $scheme://127.0.0.1:$port/healthz"
-for _ in $(seq 1 60); do
-  if curl -fsk --max-time 2 "$scheme://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
-    healthy=true
-    break
-  fi
-  sleep 2
-done
-if [[ "${healthy:-false}" != true ]]; then
+if ! wait_until_up; then
   compose logs --tail=40 homestock >&2 || true
+  [[ -z "$snapshot" || -z "$old_id" ]] || roll_back
   die "Homestock did not become healthy; the log above usually says why"
+fi
+
+if [[ -n "$snapshot" ]]; then
+  now_schema="$(docker exec homestock /usr/local/bin/homestock --config /etc/homestock/config.toml database-version 2>/dev/null || true)"
+  if [[ -n "$now_schema" && "$now_schema" != "$db_schema" ]]; then
+    say "the database was migrated from schema $db_schema to $now_schema"
+  fi
+  say "upgraded from $old_label; the pre-upgrade backup is in $snapshot"
+  mapfile -t expired < <(find "$data_dir/pre-upgrade" -mindepth 1 -maxdepth 1 -type d | sort | head -n -3)
+  for dir in "${expired[@]}"; do rm -rf -- "$dir"; done
+fi
+
+# --- tools: homestock-upgrade and homestock-admin, set up for this install -----------------
+repo="${HOMESTOCK_REPO:-cmsolomon/homestock}"
+[[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "invalid HOMESTOCK_REPO: $repo"
+install_tool() { # install_tool SOURCE NAME
+  sed -e "s|^INSTALL_DIR=.*|INSTALL_DIR=$install_dir  # set by the installer|" \
+    -e "s|^REPO=.*|REPO=\"\${HOMESTOCK_REPO:-$repo}\"  # set by the installer|" \
+    "$1" > "/usr/local/bin/$2.new"
+  chmod 0755 "/usr/local/bin/$2.new"
+  mv -f -- "/usr/local/bin/$2.new" "/usr/local/bin/$2"
+}
+install_tool "$BUNDLE_DIR/install.sh" homestock-upgrade
+install_tool "$BUNDLE_DIR/homestock-admin.sh" homestock-admin
+
+# A shortcut in the home directory of whoever ran the installer (moving or deleting it is fine).
+owner="${SUDO_USER:-root}"
+home="$(getent passwd "$owner" | cut -d: -f6 || true)"
+if [[ -n "$home" && -d "$home" ]]; then
+  if [[ -L "$home/homestock_upgrade.sh" || ! -e "$home/homestock_upgrade.sh" ]]; then
+    ln -sfn /usr/local/bin/homestock-upgrade "$home/homestock_upgrade.sh"
+    chown -h "$owner:" "$home/homestock_upgrade.sh" 2>/dev/null || true
+  else
+    warn "$home/homestock_upgrade.sh exists and is not a link; left it alone"
+  fi
 fi
 
 # --- next steps ----------------------------------------------------------------------------
@@ -326,6 +482,10 @@ cat <<EOF
       certificate), the X-Forwarded-For option on, and /healthz as the health check;
     - list the proxy's address in trusted_proxies in config.toml, then restart;
     - firewall port $port so only the proxy can reach it (on Proxmox: the container's firewall).
+
+  Upgrade:   sudo homestock-upgrade   (--check to see if there is a new release;
+             ~/homestock_upgrade.sh is a shortcut to it)
+  Accounts:  sudo homestock-admin list-users | reset-password NAME | create-admin NAME
 EOF
 if $fresh; then
   echo

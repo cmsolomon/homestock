@@ -8,26 +8,33 @@
 # deployment bundle was signed by this repository's release workflow at that release's tag,
 # then runs the installer inside the bundle. The installer also checks the image signature
 # before anything runs. Pass --help to see the installer's options.
+#
+# The installer keeps a copy of this script as /usr/local/bin/homestock-upgrade, set up for
+# that install, so upgrading is: sudo homestock-upgrade [--check | --version X.Y.Z] [--yes]
 set -euo pipefail
 
 REPO="${HOMESTOCK_REPO:-cmsolomon/homestock}"   # a fork can point this at itself
+INSTALL_DIR=/opt/homestock
 COSIGN_VERSION=v3.1.3
 OIDC_ISSUER=https://token.actions.githubusercontent.com
 
 say() { printf 'homestock: %s\n' "$*"; }
 die() { printf 'homestock: error: %s\n' "$*" >&2; exit 1; }
 
-version=""
+version="" check=false
 passthrough=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) [[ $# -ge 2 ]] || die "--version needs a value"; version="${2#v}"; shift 2 ;;
     --version=*) version="${1#--version=}"; version="${version#v}"; shift ;;
+    --install-dir) [[ $# -ge 2 ]] || die "--install-dir needs a value"; INSTALL_DIR="$2"; shift 2 ;;
+    --check) check=true; shift ;;
     *) passthrough+=("$1"); shift ;;
   esac
 done
+requested="$version"
+! $check || [[ -z "$requested" ]] || die "--check compares with the latest release; leave out --version"
 
-[[ "$(id -u)" -eq 0 ]] || die "run as root, e.g. sudo bash $0"
 for tool in curl tar sha256sum; do
   command -v "$tool" >/dev/null || die "$tool is required (on Debian/Ubuntu: apt install curl tar coreutils)"
 done
@@ -44,6 +51,22 @@ if [[ -z "$version" ]]; then
   version="${latest##*/tag/v}"
 fi
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die "could not determine a release version (got '$version')"
+
+installed=""
+if [[ -f "$INSTALL_DIR/release.env" ]]; then
+  installed="$(sed -n 's/^HOMESTOCK_VERSION=//p' "$INSTALL_DIR/release.env" | tail -n 1)"
+fi
+if $check; then
+  say "installed:      ${installed:-nothing in $INSTALL_DIR}"
+  say "latest release: $version, notes at https://github.com/$REPO/releases/tag/v$version"
+  if [[ "$installed" == "$version" ]]; then say "up to date"; else say "to upgrade: sudo homestock-upgrade"; fi
+  exit 0
+fi
+if [[ -z "$requested" && "$installed" == "$version" ]]; then
+  say "Homestock $version, the latest release, is already installed (--version $version re-applies it)"
+  exit 0
+fi
+[[ "$(id -u)" -eq 0 ]] || die "run as root, e.g. sudo bash $0"
 
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
@@ -68,5 +91,5 @@ identity="https://github.com/$REPO/.github/workflows/release.yml@refs/tags/v$ver
 say "verified: signed by $REPO's release workflow for v$version"
 
 tar -xzf "$work/$bundle" -C "$work"
-HOMESTOCK_COSIGN="$work/cosign" HOMESTOCK_SIGNER_IDENTITY="$identity" \
-  bash "$work/homestock-deploy-$version/homestock-installer.sh" "${passthrough[@]}"
+HOMESTOCK_COSIGN="$work/cosign" HOMESTOCK_SIGNER_IDENTITY="$identity" HOMESTOCK_REPO="$REPO" \
+  bash "$work/homestock-deploy-$version/homestock-installer.sh" --install-dir "$INSTALL_DIR" "${passthrough[@]}"
