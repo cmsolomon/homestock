@@ -12,6 +12,6 @@ WORKDIR /opt/homestock
 COPY --from=builder /build/target/release/homestock /usr/local/bin/homestock
 COPY static ./static
 USER 10001:10001
-EXPOSE 8080
+EXPOSE 8443
 ENTRYPOINT ["/usr/local/bin/homestock"]
 CMD ["--config", "/etc/homestock/config.toml"]

@@ -32,7 +32,7 @@ The UX in `design_handoff_homestock/README.md` and the prototype is final. Don't
 - Auth: name tiles + password, argon2id, HttpOnly cookie. Roles are admin / member. An admin reset issues a temp password and sets `must_change_pw`. Never allow removing the last admin.
 - Check-outs are deleted on return; there is no history table.
 - Theme is persisted per user (`user.theme`) and rendered server-side into `<html data-theme>`.
-- Backups: online backup API only when dirty (`PRAGMA data_version`) and idle, and only if the NAS sentinel file exists. Stage locally, then copy + rename on the NAS.
+- Backups: online SQLite backup only when dirty (`PRAGMA data_version`) and idle; stage complete pending backups locally (keep three). A separate LXC systemd timer syncs them and photos to the NAS only when the mount and sentinel are present; app startup must not depend on NAS availability.
 
 ## UI rules
 - Use the tokens in README → Design tokens via CSS variables on `:root` / `[data-theme=dark]`, exposed through Tailwind v4 `@theme inline`. Do not hard-code colours in components.

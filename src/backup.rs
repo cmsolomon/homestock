@@ -1,14 +1,13 @@
-//! Idle-aware online backup to an SMB-mounted NAS.
+//! Idle-aware online backup to a local pending queue.
 //!
 //! - Dirty detection: `PRAGMA data_version` on our own long-lived connection changes
 //!   whenever the app's connection commits. The initial value is a clean baseline, so
 //!   startup alone does not trigger a backup. No bookkeeping in handlers.
 //! - Idle detection: `Activity` (updated by middleware on every request).
-//! - Safety: only runs if `<backup directory>/<sentinel>` exists, so an unmounted share
-//!   (an empty local mount point) never fills the container disk.
+//! - NAS synchronization is handled outside the app so the service can start before SMB.
 use crate::{activity::Activity, config::BackupConfig, db::open_conn};
 use rusqlite::{backup::Backup, Connection};
-use std::{fs, path::{Path, PathBuf}, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{fs, path::PathBuf, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() }
 
@@ -33,8 +32,6 @@ impl Backupper {
         Ok(self.last_version != Some(v))
     }
 
-    fn nas_ready(&self) -> bool { Path::new(&self.cfg.directory).join(&self.cfg.sentinel).exists() }
-
     /// Decide and (maybe) run. Called every 60 s on the blocking pool, and once at shutdown with `force`.
     pub fn tick(&mut self, activity: &Activity, force: bool) {
         let dirty = match self.dirty() { Ok(d) => d, Err(e) => { tracing::warn!("backup: data_version failed: {e}"); return; } };
@@ -46,15 +43,15 @@ impl Backupper {
             || (idle && since >= self.cfg.min_interval_secs)
             || since >= self.cfg.max_interval_secs;
         if !due { return; }
-        if !self.nas_ready() { tracing::warn!("backup: sentinel missing at {}, skipping", self.cfg.directory); return; }
-
         match self.run() {
             Ok(name) => {
                 self.last_backup = t;
-                self.last_version = self.conn.query_row("PRAGMA data_version", [], |r| r.get(0)).ok();
-                tracing::info!("backup: wrote {name}");
-                if let Err(e) = self.prune() { tracing::warn!("backup: prune failed: {e}"); }
-                if self.cfg.sync_photos { if let Err(e) = self.sync_photos() { tracing::warn!("backup: photo sync failed: {e}"); } }
+                match self.conn.query_row("PRAGMA data_version", [], |r| r.get(0)) {
+                    Ok(version) => self.last_version = Some(version),
+                    Err(e) => tracing::warn!("backup: data_version refresh failed: {e}"),
+                }
+                tracing::info!("backup: staged local copy {name}");
+                if let Err(e) = self.prune_pending() { tracing::warn!("backup: pending-copy prune failed: {e}"); }
                 let _ = self.conn.execute_batch("PRAGMA optimize;");
             }
             Err(e) => tracing::error!("backup: failed: {e}"),
@@ -63,11 +60,14 @@ impl Backupper {
 
     fn run(&self) -> Result<String, Box<dyn std::error::Error>> {
         let name = format!("homestock-{}.sqlite3", now());
-        let nas = PathBuf::from(&self.cfg.directory);
-        let staging = if self.cfg.stage_locally { self.data_dir.join("staging") } else { nas.clone() };
+        let staging = self.data_dir.join("staging");
         fs::create_dir_all(&staging)?;
         let tmp = staging.join(format!("{name}.part"));
-        let _ = fs::remove_file(&tmp);
+        match fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
 
         // Online backup: copies 256 pages at a time and pauses between steps,
         // so app writes are never blocked for long.
@@ -81,47 +81,27 @@ impl Backupper {
             if check != "ok" { return Err(format!("quick_check: {check}").into()); }
         } // dst closed + flushed here
 
-        let final_path = nas.join(&name);
-        if self.cfg.stage_locally {
-            let part = nas.join(format!("{name}.part"));
-            fs::copy(&tmp, &part)?;
-            fs::File::open(&part)?.sync_all()?;
-            fs::rename(&part, &final_path)?;
-            fs::remove_file(&tmp)?;
-        } else {
-            fs::rename(&tmp, &final_path)?;
-        }
+        fs::File::open(&tmp)?.sync_all()?;
+        let final_path = staging.join(&name);
+        fs::rename(&tmp, &final_path)?;
+        fs::File::open(&staging)?.sync_all()?;
         Ok(name)
     }
 
-    fn prune(&self) -> std::io::Result<()> {
-        let mut files: Vec<_> = fs::read_dir(&self.cfg.directory)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("homestock-") && n.ends_with(".sqlite3")))
-            .collect();
-        files.sort(); // unix-timestamp names sort chronologically
-        let excess = files.len().saturating_sub(self.cfg.keep);
-        for p in files.into_iter().take(excess) { fs::remove_file(p)?; }
-        Ok(())
-    }
-
-    /// Photos are content-addressed and immutable: copy whatever the NAS lacks.
-    fn sync_photos(&self) -> std::io::Result<()> {
-        let src = self.data_dir.join("photos");
-        let dst = Path::new(&self.cfg.directory).join("photos");
-        if !src.exists() { return Ok(()); }
-        fs::create_dir_all(&dst)?;
-        for e in fs::read_dir(&src)? {
-            let p = e?.path();
-            let Some(name) = p.file_name() else { continue };
-            let target = dst.join(name);
-            if !target.exists() {
-                let part = dst.join(format!("{}.part", name.to_string_lossy()));
-                fs::copy(&p, &part)?;
-                fs::rename(&part, &target)?;
+    fn prune_pending(&self) -> std::io::Result<()> {
+        let mut files = Vec::new();
+        for entry in fs::read_dir(self.data_dir.join("staging"))? {
+            let path = entry?.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            if name.starts_with("homestock-") && name.ends_with(".sqlite3.part") {
+                fs::remove_file(path)?;
+            } else if name.starts_with("homestock-") && name.ends_with(".sqlite3") {
+                files.push(path);
             }
         }
+        files.sort();
+        let excess = files.len().saturating_sub(self.cfg.pending_keep);
+        for p in files.into_iter().take(excess) { fs::remove_file(p)?; }
         Ok(())
     }
 }
@@ -129,6 +109,7 @@ impl Backupper {
 #[cfg(test)]
 mod tests {
     use super::Backupper;
+    use crate::activity::Activity;
     use crate::config::BackupConfig;
     use rusqlite::Connection;
     use std::{fs, time::{SystemTime, UNIX_EPOCH}};
@@ -140,16 +121,12 @@ mod tests {
         dir
     }
 
-    fn test_config(directory: String) -> BackupConfig {
+    fn test_config() -> BackupConfig {
         BackupConfig {
-            directory,
-            sentinel: ".homestock-nas".into(),
             idle_secs: 300,
             min_interval_secs: 1800,
             max_interval_secs: 86400,
-            keep: 48,
-            stage_locally: true,
-            sync_photos: true,
+            pending_keep: 3,
         }
     }
 
@@ -161,7 +138,7 @@ mod tests {
         other_connection.execute_batch("CREATE TABLE sample (value INTEGER);").expect("create table");
 
         let mut backupper = Backupper::new(
-            test_config(dir.join("backups").to_string_lossy().into_owned()),
+            test_config(),
             db_path,
             dir.clone(),
         ).expect("create backupper");
@@ -173,6 +150,63 @@ mod tests {
 
         drop(backupper);
         drop(other_connection);
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn writes_pending_backup_without_nas_mount() {
+        let dir = test_directory();
+        let db_path = dir.join("homestock.sqlite3");
+        let other_connection = Connection::open(&db_path).expect("open database");
+        other_connection.execute_batch("CREATE TABLE sample (value INTEGER);").expect("create table");
+
+        let mut backupper = Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
+        other_connection.execute("INSERT INTO sample(value) VALUES (1)", []).expect("commit change");
+        backupper.tick(&Activity::default(), true);
+
+        let staging = dir.join("staging");
+        let backups: Vec<_> = fs::read_dir(&staging).expect("list pending directory")
+            .map(|entry| entry.expect("read pending entry").path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "sqlite3"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        let backup = Connection::open(&backups[0]).expect("open staged backup");
+        let value: i64 = backup.query_row("SELECT value FROM sample", [], |row| row.get(0))
+            .expect("read staged data");
+        assert_eq!(value, 1);
+        assert!(!dir.join("backups").exists());
+
+        drop(backup);
+        drop(backupper);
+        drop(other_connection);
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn pending_queue_keeps_only_the_newest_configured_backups() {
+        let dir = test_directory();
+        let db_path = dir.join("homestock.sqlite3");
+        let _connection = Connection::open(&db_path).expect("open database");
+        let backupper = Backupper::new(test_config(), db_path, dir.clone()).expect("create backupper");
+        let staging = dir.join("staging");
+        fs::create_dir_all(&staging).expect("create pending directory");
+        for timestamp in 1..=4 {
+            fs::write(staging.join(format!("homestock-{timestamp}.sqlite3")), b"backup")
+                .expect("create pending backup");
+        }
+        fs::write(staging.join("homestock-5.sqlite3.part"), b"incomplete")
+            .expect("create partial backup");
+
+        backupper.prune_pending().expect("prune pending backups");
+
+        let files: Vec<_> = fs::read_dir(&staging).expect("list pending backups")
+            .map(|entry| entry.expect("read pending entry").file_name().into_string().expect("utf-8 name"))
+            .collect();
+        let mut files = files;
+        files.sort();
+        assert_eq!(files, ["homestock-2.sqlite3", "homestock-3.sqlite3", "homestock-4.sqlite3"]);
+
+        drop(backupper);
         fs::remove_dir_all(dir).expect("remove test directory");
     }
 }

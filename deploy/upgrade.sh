@@ -43,11 +43,19 @@ if [[ ! -f "$DATA_DIR/$DATABASE_RELATIVE_PATH" ]]; then
   exit 1
 fi
 
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now docker.service
+fi
+
 if [[ -f homestock-image.tar ]]; then
   docker load --input homestock-image.tar
 else
   docker compose pull
 fi
 docker compose up -d --no-build
+
+if [[ -f install-backup-sync.sh ]]; then
+  ./install-backup-sync.sh
+fi
 
 echo "Homestock upgraded. The existing config and Compose bind-mounted data were left in place."

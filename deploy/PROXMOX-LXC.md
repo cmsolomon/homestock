@@ -7,7 +7,7 @@ This guide installs Homestock in an unprivileged Debian LXC on Proxmox VE 9, run
 - The live SQLite database, SQLite WAL files, photos, and temporary backup staging files live on the LXC's local storage.
 - rclone mounts the SMB share inside the LXC at `/mnt/homestock-backups`. Homestock writes completed database backups and copies photos there.
 - Docker Compose runs the published Homestock image as UID/GID `10001`.
-- HAProxy terminates HTTPS centrally. Homestock serves HTTP on the LXC for the HAProxy backend, with access restricted to the HAProxy host.
+- Homestock serves HTTPS directly on port `8443` using a certificate mounted from the LXC.
 
 **Do not put the live SQLite database or its `-wal`/`-shm` files on the SMB mount.** SQLite WAL relies on local filesystem locking. Homestock stages an online SQLite backup locally, validates it, then copies the completed backup to the SMB destination.
 
@@ -32,7 +32,7 @@ In the Proxmox VE 9 web interface:
 4. Allocate at least 2 CPU cores, 1 GB RAM, and enough local disk for the OS, Docker image, database, and photos. Increase disk space as the photo library grows.
 5. On the **Template** page select Debian 13; on **Disks**, use local storage (not the NAS CIFS share).
 6. Finish creating the container, then select it and open **Options → Features → Edit**. Enable **Nesting**, **Keyctl**, and **FUSE**.
-7. In **Options → Start at boot**, leave automatic startup disabled. This guide uses a manual startup sequence so the NAS is available before CT 107 and its rclone mount start.
+7. In **Options → Start at boot**, enable automatic startup. Homestock starts independently of the NAS; its backup sync timer waits for the SMB mount and sentinel.
 8. Start the container from the GUI, then open its **Console** tab.
 
 Record the numeric CT ID. If you prefer the CLI, `pct start <CTID>` and `pct enter <CTID>` on the Proxmox host perform the equivalent start and console access. Confirm the CT is unprivileged in **Options** or with `pct config <CTID>`; the latter should include `unprivileged: 1`.
@@ -149,26 +149,9 @@ mountpoint -q /mnt/homestock-backups \
   && echo "SMB mount and sentinel are ready"
 ```
 
-Do not create `.homestock-nas` in the plain local mount-point directory if rclone is not mounted. Homestock uses this marker to avoid writing backups to local disk when the NAS mount is unavailable.
+Do not create `.homestock-nas` in the plain local mount-point directory if rclone is not mounted. The backup sync timer requires this marker before copying pending backups to the NAS.
 
-If the NAS is another guest on this Proxmox host, make sure the NAS starts first and SMB is available before starting Homestock. For the manual GUI workflow, leave CT 107's **Start at boot** disabled. Section 4 configures Docker not to start automatically; after each reboot, start it only once the rclone mount and sentinel are confirmed.
-
-After a PVE reboot, start the NAS, wait for SMB, then start CT 107. Inside the LXC, confirm the rclone service and mount are ready before starting Docker:
-
-```sh
-systemctl status rclone-homestock.service
-mountpoint -q /mnt/homestock-backups \
-  && test -e /mnt/homestock-backups/.homestock-nas \
-  || { echo "SMB mount or sentinel is not ready; do not start Docker" >&2; exit 1; }
-systemctl start docker
-```
-
-Docker starts the Compose container with the actual FUSE mount in place. If rclone has to be restarted while Docker and Homestock are already running, recreate the app container so its bind mount attaches to the active FUSE mount:
-
-```sh
-cd /opt/homestock
-docker compose up -d --force-recreate
-```
+If the NAS is another guest on this Proxmox host, configure its startup order to start before CT 107 when possible. Homestock starts without waiting for it; the backup sync timer retries after the SMB mount becomes available.
 
 Verify that files are accessible as the app's UID:
 
@@ -178,7 +161,7 @@ setpriv --reuid=10001 --regid=10001 --clear-groups -- touch /mnt/homestock-backu
 setpriv --reuid=10001 --regid=10001 --clear-groups -- rm /mnt/homestock-backups/.write-test
 ```
 
-Both write-test commands must succeed before configuring Homestock backups. If they fail, check rclone's mount service, the UID/GID and FUSE permissions, and the SMB account's TrueNAS share/dataset ACL.
+Both write-test commands must succeed before configuring the backup sync timer. If they fail, check rclone's mount service, the UID/GID and FUSE permissions, and the SMB account's TrueNAS share/dataset ACL.
 
 ## 4. Install Docker Engine and Compose in the LXC
 
@@ -201,13 +184,10 @@ docker compose version
 
 The `hello-world` command verifies that Docker can create and run a container in this LXC. If it fails with an overlay filesystem, AppArmor, or `operation not permitted` error, recheck **Nesting** and **Keyctl**. Do not switch the LXC to privileged as a shortcut; use a VM if the host/container combination cannot run Docker safely.
 
-Docker is running for this setup session. Disable the daemon and socket's automatic startup so they cannot start the Homestock container before rclone has mounted the SMB share after an LXC reboot:
+Leave Docker's normal automatic startup enabled. Compose uses `restart: unless-stopped`, and Homestock writes backups locally without requiring the NAS to be mounted:
 
 ```sh
-systemctl disable docker.service
-if systemctl is-enabled --quiet docker.socket; then
-    systemctl disable docker.socket
-fi
+systemctl enable docker.service
 ```
 
 ## 5. Create the Homestock deployment
@@ -217,6 +197,7 @@ Create a stable deployment directory and local data directory inside the LXC:
 ```sh
 install -d -m 0755 /opt/homestock
 install -d -o 10001 -g 10001 -m 0700 /srv/homestock/data
+install -d -o 10001 -g 10001 -m 0700 /srv/homestock/certs
 cd /opt/homestock
 ```
 
@@ -225,10 +206,24 @@ Create `/opt/homestock/.env` and set the release image tag to one that has been 
 ```dotenv
 HOMESTOCK_IMAGE=ghcr.io/ntyndall1/homestock:1.2.3
 HOMESTOCK_DATA_DIR=/srv/homestock/data
+HOMESTOCK_CERT_DIR=/srv/homestock/certs
 HOMESTOCK_BACKUP_DIR=/mnt/homestock-backups
 HOMESTOCK_UID=10001
 HOMESTOCK_GID=10001
+HOMESTOCK_BACKUP_REQUIRE_MOUNT=true
+HOMESTOCK_BACKUP_SENTINEL=.homestock-nas
+HOMESTOCK_BACKUP_KEEP=48
+HOMESTOCK_SYNC_PHOTOS=true
 ```
+
+Place a PEM certificate chain in `/srv/homestock/certs/cert.pem` and its matching private key in `/srv/homestock/certs/key.pem`. Make them readable by UID `10001` inside the container. For example, as root:
+
+```sh
+install -o 10001 -g 10001 -m 0644 /path/to/your-cert.pem /srv/homestock/certs/cert.pem
+install -o 10001 -g 10001 -m 0600 /path/to/your-private-key.pem /srv/homestock/certs/key.pem
+```
+
+Use those filenames for either a snakeoil or a trusted certificate. A self-signed snakeoil certificate encrypts traffic, but browsers warn that they cannot verify its identity unless you explicitly trust it. For a trusted certificate, ensure its SAN covers the hostname clients use.
 
 Use the actual published release version instead of `1.2.3`. The Actions workflow publishes images after a GitHub Release is published with a semantic version tag such as `v1.2.3`; it publishes tags `1.2.3`, `1.2`, `1`, and a commit-SHA tag. Prefer the full version tag for a predictable deployment.
 
@@ -245,10 +240,10 @@ services:
     init: true
     user: "${HOMESTOCK_UID:-10001}:${HOMESTOCK_GID:-10001}"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8443:8443"
     volumes:
       - "${HOMESTOCK_DATA_DIR:-./data}:/var/lib/homestock"
-      - "${HOMESTOCK_BACKUP_DIR:-./backups}:/var/backups/homestock"
+      - "${HOMESTOCK_CERT_DIR:-./certs}:/etc/homestock/certs:ro"
       - "./config.toml:/etc/homestock/config.toml:ro"
     read_only: true
     tmpfs:
@@ -260,38 +255,36 @@ services:
     stop_grace_period: 45s
 ```
 
-The example Compose file binds port `8080` to LXC loopback by default. Since HAProxy is on another machine/LXC and will connect to port `80`, change the port mapping to the Homestock LXC's fixed LAN IP and map host port 80 to app port 8080. For example, replace the `ports` entry with:
+The example Compose file publishes HTTPS port `8443` on the LXC's network interfaces. Restrict access with the Proxmox or network firewall if needed. You can instead bind only to the LXC's fixed LAN IP:
 
 ```yaml
 ports:
-  - "10.0.0.107:80:8080"
+  - "10.0.0.107:8443:8443"
 ```
 
-Replace `10.0.0.107` with CT 107's actual static/reserved IP. Restrict access to this port with the Proxmox firewall or network firewall so only the HAProxy address can connect. Do not expose this backend port to untrusted networks.
+Replace `10.0.0.107` with CT 107's actual static/reserved IP. Restrict access to this port with the Proxmox firewall or network firewall as appropriate.
 
 ### Homestock config file
 
 Create `/opt/homestock/config.toml`:
 
 ```toml
-bind = "0.0.0.0:8080"
+bind = "0.0.0.0:8443"
+tls_cert = "/etc/homestock/certs/cert.pem"
+tls_key = "/etc/homestock/certs/key.pem"
 data_dir = "/var/lib/homestock"
 database_path = "/var/lib/homestock/homestock.sqlite3"
 session_days = 30
 cookie_secure = true
 
 [backup]
-directory = "/var/backups/homestock"
-sentinel = ".homestock-nas"
 idle_secs = 300
 min_interval_secs = 1800
 max_interval_secs = 86400
-keep = 48
-stage_locally = true
-sync_photos = true
+pending_keep = 3
 ```
 
-These are paths **inside the app container**. Compose maps `/var/lib/homestock` to the LXC's local `/srv/homestock/data`, and maps `/var/backups/homestock` to the LXC's rclone FUSE mount. Keep the database on the local data mount.
+These are paths **inside the app container**. Compose maps `/var/lib/homestock` to the LXC's local `/srv/homestock/data`, which contains the database, photos, and up to three complete pending backups. The cert directory is mounted read-only from `/srv/homestock/certs` on the LXC. Homestock serves HTTPS directly on port `8443`; the app container does not mount the NAS.
 
 ## 6. Pull and start Homestock
 
@@ -301,48 +294,38 @@ If the GHCR package is public, no registry login is needed. If it is private, lo
 printf '%s' 'YOUR_GITHUB_TOKEN' | docker login ghcr.io --username YOUR_GITHUB_USERNAME --password-stdin
 ```
 
-Start the app:
+Start the app and install its independent backup-sync timer:
 
 ```sh
 cd /opt/homestock
-systemctl status rclone-homestock.service
-mountpoint -q /mnt/homestock-backups \
-  && test -e /mnt/homestock-backups/.homestock-nas \
-  || { echo "SMB mount or sentinel is not ready; do not start Homestock" >&2; exit 1; }
-systemctl start docker
 docker compose config
+systemctl enable --now docker.service
 docker compose pull
 docker compose up -d
+./install-backup-sync.sh
 docker compose ps
 docker compose logs --tail=100 homestock
 ```
 
-`docker compose config` should show the expected absolute LXC paths and GHCR image. Fix any missing environment variables or paths before starting. The Homestock image intentionally contains no shell, so do not use `docker compose run --entrypoint /bin/sh` to test the backup mount. The UID/GID write test from §3 checks the same mounted directory directly inside the LXC:
+`docker compose config` should show the expected absolute LXC paths and GHCR image. Fix any missing environment variables or paths before starting. The sync timer runs as UID/GID `10001`; adjust its service unit if you use a different app UID. Check it with `systemctl status homestock-backup-sync.timer` and inspect runs with `journalctl -u homestock-backup-sync.service`.
 
-```sh
-setpriv --reuid=10001 --regid=10001 --clear-groups -- touch /mnt/homestock-backups/.write-test
-setpriv --reuid=10001 --regid=10001 --clear-groups -- rm /mnt/homestock-backups/.write-test
-```
-
-Both commands must succeed, and `/mnt/homestock-backups/.homestock-nas` must be visible inside the LXC before starting Homestock.
+Test the NAS mount is writable by UID `10001` using the `setpriv` write test in §3. The app can already be running; pending backups upload once the timer sees both the mount and sentinel.
 
 The first visit displays the setup page. Create the household admin there. Do not add initial passwords to `config.toml`; the normal setup flow is preferred.
 
-## 7. Configure HAProxy TLS offload
+## 7. Verify HTTPS
 
-Configure HAProxy as the HTTPS frontend for the Homestock hostname, using the certificate already managed on the HAProxy host. Set its backend server to CT 107's fixed LAN IP on port `80` (the Compose mapping forwards that to Homestock's internal port `8080`). Configure HAProxy to health-check the backend and pass the original host and forwarding protocol headers as appropriate for your HAProxy setup.
-
-Keep `cookie_secure = true` in `config.toml`. The browser connects to HAProxy over HTTPS, so Homestock's session cookies remain `Secure` even though the HAProxy-to-LXC backend connection uses HTTP. TLS is not end-to-end in this arrangement: traffic between HAProxy and Homestock is unencrypted. Keep that backend on a trusted, access-controlled LAN/VLAN and allow only HAProxy to reach the LXC's port 80. Do not publish the backend port to the internet.
+Homestock serves HTTPS directly on port `8443`, using the certificate and key configured in `config.toml`. Visit `https://<LXC-IP>:8443/` from another device. Keep `cookie_secure = true`.
 
 ## 8. Verify backup behavior
 
-The backup destination is only used when `/var/backups/homestock/.homestock-nas` exists. Check from inside the LXC:
+The sync timer only writes to the NAS when the mount and sentinel are present. Check from inside the LXC:
 
 ```sh
 test -e /mnt/homestock-backups/.homestock-nas && echo "NAS sentinel present"
 ```
 
-Backups are dirty-and-idle driven: the backup worker captures a database-version baseline at app startup, so startup alone does not trigger a backup. By default Homestock waits until a subsequent database change, the app has been idle for five minutes, and at least 30 minutes have passed since the last backup. Changed databases are also backed up at least daily. A graceful shutdown creates a backup immediately only if the database has changed since the last backup. Photos are copied to the share when a database backup runs. Files have names such as `homestock-<unix-time>.sqlite3`; old backups are pruned to the newest 48.
+Backups are dirty-and-idle driven: the backup worker captures a database-version baseline at app startup, so startup alone does not trigger a backup. By default Homestock waits until a subsequent database change, the app has been idle for five minutes, and at least 30 minutes have passed since the last backup. Changed databases are also backed up at least daily. A graceful shutdown creates a local backup immediately only if the database has changed since the last backup. The app keeps up to three local pending database backups. The separate timer uploads pending backups and photos when the NAS is available, then prunes NAS database backups to the newest 48.
 
 The first setup may not produce a backup until a database change occurs and the idle/interval conditions are met (or the app shuts down gracefully while dirty). Check app logs for backup messages:
 
@@ -350,7 +333,7 @@ The first setup may not produce a backup until a database change occurs and the 
 docker compose logs --since=24h homestock | grep 'backup:'
 ```
 
-If the share is unavailable, the sentinel check causes backup attempts to be skipped. Do not create `.homestock-nas` in the underlying empty mount-point directory. Once SMB is available again, verify the sentinel and rclone mount. If rclone had to be restarted while Homestock was running, recreate the app container so its bind mount attaches to the FUSE mount.
+If the share is unavailable, Homestock continues running and stores pending backups locally; at most three are kept. The sync timer leaves them in place until both the mount and sentinel are present. Do not create `.homestock-nas` in the underlying empty mount-point directory. No container recreation is needed after rclone reconnects.
 
 ## 9. Upgrade without losing the database
 
@@ -358,7 +341,7 @@ Before an upgrade:
 
 1. Confirm the latest backup exists on the NAS and is readable.
 2. Keep the same `/srv/homestock/data` directory and `database_path` in `config.toml`.
-3. Confirm the rclone SMB mount and sentinel are available; start Docker manually if the LXC has rebooted.
+3. The rclone mount and sentinel are not required for app startup; the backup sync timer will resume when they are available.
 4. Change `HOMESTOCK_IMAGE` in `.env` to the new published full version tag.
 5. Pull and recreate the service:
 
@@ -379,11 +362,11 @@ Do **not** run `docker compose down -v`, remove `/srv/homestock/data`, or change
 |---|---|
 | Docker fails to start in the LXC | Confirm the LXC is unprivileged and **Nesting**/**Keyctl** are enabled. If the host kernel still blocks Docker, use a VM rather than a privileged LXC. |
 | Backup directory is not writable | Check `systemctl status rclone-homestock.service`, the mount's UID/GID (`10001:10001`), FUSE permissions, and the TrueNAS SMB ACL. Run the `setpriv` write test in §3. |
-| No backups appear | Confirm `mountpoint -q /mnt/homestock-backups`, the sentinel, dirty/idle intervals, rclone service logs (`journalctl -u rclone-homestock.service`), and `docker compose logs`. |
-| NAS guest starts but Homestock backups are unavailable | Start the NAS guest first, then verify SMB connectivity, `rclone-homestock.service`, and the sentinel inside CT 107. |
-| Backups stop after Proxmox reboot | Start the NAS first, then CT 107; confirm the rclone mount and sentinel before running `systemctl start docker` inside the LXC. |
+| No NAS backups appear | Confirm `mountpoint -q /mnt/homestock-backups`, the sentinel, `homestock-backup-sync.timer`, rclone service logs (`journalctl -u rclone-homestock.service`), and sync logs (`journalctl -u homestock-backup-sync.service`). |
+| NAS guest starts later than Homestock | Homestock should already be available. The timer uploads pending backups after rclone mounts the share and the sentinel appears. |
+| Docker/Homestock does not start after reboot | Confirm CT 107 is set to start at boot, then check `systemctl status docker.service` and `docker compose ps`. NAS availability is not required for app startup. |
 | `unauthorized` when pulling GHCR | Make the package public, or run `docker login ghcr.io` with a token that can read packages. |
-| App is not reachable | Confirm `docker compose ps`, HAProxy backend target (CT 107's fixed IP on port 80), DNS, firewall rules allowing HAProxy, and HTTPS frontend configuration. |
+| App is not reachable | Confirm `docker compose ps`, the Compose port mapping to CT 107's fixed IP on port `8443`, DNS, firewall rules, and certificate/key paths in `config.toml`. |
 
 ## References
 

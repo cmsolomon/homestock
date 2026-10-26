@@ -8,6 +8,9 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 docker compose version >/dev/null
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now docker.service
+fi
 
 for file in config.example.toml docker-compose.yml; do
   if [[ ! -f "$file" ]]; then
@@ -24,7 +27,7 @@ if [[ ! -e .env ]]; then
   cp .env.example .env
 fi
 
-mkdir -p data backups
+mkdir -p data backups certs
 if [[ -f homestock-image.tar ]]; then
   docker load --input homestock-image.tar
 else
@@ -32,4 +35,8 @@ else
 fi
 docker compose up -d --no-build
 
-echo "Homestock is running on 127.0.0.1:8080. Persistent data is in the configured data directory."
+if [[ -f install-backup-sync.sh ]]; then
+  ./install-backup-sync.sh
+fi
+
+echo "Homestock is running at https://127.0.0.1:8443. Persistent data is in the configured data directory."

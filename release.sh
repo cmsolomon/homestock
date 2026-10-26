@@ -25,7 +25,9 @@ cp "$ROOT/deploy/docker-compose.yml" "$PACKAGE/docker-compose.yml"
 cp "$ROOT/deploy/config.example.toml" "$PACKAGE/config.example.toml"
 cp "$ROOT/deploy/.env.example" "$PACKAGE/.env.example"
 cp "$ROOT/deploy/README.md" "$PACKAGE/README.md"
-cp "$ROOT/deploy/install.sh" "$ROOT/deploy/upgrade.sh" "$PACKAGE/"
+cp "$ROOT/deploy/install.sh" "$ROOT/deploy/upgrade.sh" "$ROOT/deploy/install-backup-sync.sh" "$PACKAGE/"
+cp "$ROOT/deploy/sync-homestock-backups.sh" "$PACKAGE/"
+cp "$ROOT/deploy/systemd/homestock-backup-sync.service" "$ROOT/deploy/systemd/homestock-backup-sync.timer" "$PACKAGE/"
 
 ARCHIVE="$ROOT/dist/homestock-$VERSION.tar.gz"
 tar -C "$PACKAGE" -czf "$ARCHIVE" .

@@ -1,6 +1,6 @@
 mod activity; mod auth; mod backup; mod config; mod db; mod error; mod photos; mod repo; mod routes; mod search;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -35,15 +35,33 @@ async fn main() -> anyhow_free::Result {
 
     let app = routes::router(state);
     let addr: SocketAddr = cfg.bind.parse()?;
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!("listening on http://{addr}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            if let Err(error) = shutdown_signal().await {
-                tracing::error!("failed to install shutdown signal handler: {error}");
-            }
-        })
-        .await?;
+    let handle = axum_server::Handle::new();
+    let shutdown_handle = handle.clone();
+    tokio::spawn(async move {
+        if let Err(error) = shutdown_signal().await {
+            tracing::error!("failed to install shutdown signal handler: {error}");
+        }
+        shutdown_handle.graceful_shutdown(Some(Duration::from_secs(30)));
+    });
+
+    match (&cfg.tls_cert, &cfg.tls_key) {
+        (Some(cert), Some(key)) => {
+            let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
+            tracing::info!("listening on https://{addr}");
+            axum_server::tls_rustls::bind_rustls(addr, tls)
+                .handle(handle)
+                .serve(app.into_make_service())
+                .await?;
+        }
+        (None, None) => {
+            tracing::info!("listening on http://{addr}");
+            axum_server::bind(addr)
+                .handle(handle)
+                .serve(app.into_make_service())
+                .await?;
+        }
+        _ => return Err("tls_cert and tls_key must be set together".into()),
+    }
 
     let _ = stop_tx.send(true);   // final backup if dirty
     let _ = backup_task.await;
