@@ -1,12 +1,14 @@
+# Managed by the Homestock installer and replaced on each run; settings live in install.conf.
+name: homestock
 services:
   homestock:
-    image: "${HOMESTOCK_IMAGE:-homestock:release}"
+    image: "${HOMESTOCK_IMAGE:?HOMESTOCK_IMAGE is set in .env by the installer}"
     container_name: homestock
     restart: unless-stopped
     init: true
     user: "${HOMESTOCK_UID:-10001}:${HOMESTOCK_GID:-10001}"
     ports:
-      - "8443:8443"
+      - "${HOMESTOCK_PORT:-8443}:8443"
     volumes:
       - "${HOMESTOCK_DATA_DIR:-./data}:/var/lib/homestock"
       - "${HOMESTOCK_CERT_DIR:-./certs}:/etc/homestock/certs:ro"
