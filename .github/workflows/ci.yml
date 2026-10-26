@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   check:
-    name: Lint and test
+    name: Lint, test and build CSS
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -28,3 +28,6 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+
+      - name: Build CSS
+        run: scripts/build-css.sh

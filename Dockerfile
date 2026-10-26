@@ -1,3 +1,13 @@
+# static/app.css is generated from styles/input.css and the class names in templates, JS and Rust.
+FROM rust:1-trixie AS css
+WORKDIR /build
+COPY scripts/build-css.sh scripts/
+COPY styles ./styles
+COPY templates ./templates
+COPY static/app.js ./static/
+COPY src ./src
+RUN scripts/build-css.sh
+
 FROM rust:1-trixie AS builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
@@ -11,6 +21,7 @@ RUN useradd --system --uid 10001 --no-create-home homestock
 WORKDIR /opt/homestock
 COPY --from=builder /build/target/release/homestock /usr/local/bin/homestock
 COPY static ./static
+COPY --from=css /build/static/app.css ./static/app.css
 USER 10001:10001
 EXPOSE 8443
 ENTRYPOINT ["/usr/local/bin/homestock"]

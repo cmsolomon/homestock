@@ -7,7 +7,7 @@ Rust stable · axum 0.8 + tokio (current_thread) · rusqlite (bundled, backup) w
 Architecture, routes, backups and Docker deployment: `design_handoff_homestock/IMPLEMENTATION.md`. The active Rust application is in `src/`; `design_handoff_homestock/starter/` is reference material.
 
 ## Offline
-The app must work with no internet connection. Never add CDN links, web fonts, remote scripts or external API calls. Tailwind runs only at build time (standalone CLI → `static/app.css`). HTMX is vendored in `static/`.
+The app must work with no internet connection. Never add CDN links, web fonts, remote scripts or external API calls. Tailwind runs only at build time: `scripts/build-css.sh` (pinned standalone CLI) generates `static/app.css`, which is not committed; the Dockerfile and CI run it. HTMX is vendored in `static/`.
 
 ## UX
 The UX in `design_handoff_homestock/README.md` and the prototype is final. Don't add fields or screens it doesn't have (e.g. there is no item description field; use notes).
