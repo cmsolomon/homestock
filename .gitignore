@@ -27,3 +27,6 @@
 
 # Editor files
 *.code-workspace
+
+# Screenshot tool dependencies (scripts/screenshots/run.sh installs them)
+/scripts/screenshots/node_modules/

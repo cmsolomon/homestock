@@ -1,6 +1,7 @@
 mod activity;
 mod auth;
 mod backup;
+mod cli;
 mod config;
 mod db;
 mod error;
@@ -10,7 +11,8 @@ mod routes;
 mod search;
 mod security;
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use cli::Command;
+use std::{net::SocketAddr, process::ExitCode, sync::Arc, time::Duration};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -20,24 +22,58 @@ pub struct AppState {
     pub passwords: Arc<security::PasswordLimiter>,
 }
 
-// current_thread: one OS thread for async work; blocking work uses tokio's lazy blocking pool.
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow_free::Result {
+fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let cfg = Arc::new(config::Config::load_from_args()?);
+    let invocation = match cli::parse(std::env::args().skip(1)) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            eprintln!("homestock: {error}\n\n{}", cli::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let result = match invocation.command {
+        Command::Help => {
+            print!("{}", cli::USAGE);
+            Ok(())
+        }
+        Command::SchemaVersion => {
+            println!("{}", db::CURRENT_SCHEMA_VERSION);
+            Ok(())
+        }
+        Command::Serve => config::Config::load(&invocation.config).and_then(serve),
+        command => config::Config::load(&invocation.config).and_then(|cfg| {
+            println!("{}", cli::run(&cfg, command)?);
+            Ok(())
+        }),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("homestock: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+// current_thread: one OS thread for async work; blocking work uses tokio's lazy blocking pool.
+fn serve(cfg: config::Config) -> anyhow_free::Result {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(run_server(cfg))
+}
+
+async fn run_server(cfg: config::Config) -> anyhow_free::Result {
+    let cfg = Arc::new(cfg);
     std::fs::create_dir_all(cfg.data_dir.join("photos"))?;
     let db_path = cfg.database_path();
     if let Some(parent) = db_path.parent().filter(|path| !path.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
     let db = db::Db::open(&db_path)?;
-    {
-        let seeds = cfg.seed_users.clone();
-        db.call(move |c| auth::seed_users(c, &seeds)).await?;
-    }
 
     let activity = Arc::new(activity::Activity::default());
     let state = AppState {

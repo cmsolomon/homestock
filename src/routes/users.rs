@@ -116,7 +116,7 @@ pub async fn reset(
     Ok(Html(ResetPasswordResult { name, password }.render()?))
 }
 
-fn set_temporary_password(
+pub(crate) fn set_temporary_password(
     c: &mut rusqlite::Connection,
     id: i64,
     password_hash: &str,
@@ -297,7 +297,7 @@ pub(crate) fn ensure_name_available(c: &rusqlite::Connection, name: &str) -> Res
     Ok(())
 }
 
-fn insert_user(
+pub(crate) fn insert_user(
     c: &mut rusqlite::Connection,
     name: &str,
     role: &str,

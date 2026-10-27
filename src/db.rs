@@ -8,7 +8,7 @@ use std::{
 };
 
 // Keep this in sync with the highest PRAGMA user_version in migrations/.
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 /// Single connection behind a mutex. Every call runs on the blocking pool.
 /// For a 2–6 person household this is simpler and lighter than a pool,
@@ -21,6 +21,9 @@ impl Db {
         let existed = path.exists();
         let conn = open_conn(path)?;
         let version = schema_version(&conn)?;
+        if version > CURRENT_SCHEMA_VERSION {
+            return Err(newer_schema(version));
+        }
         if existed && version < CURRENT_SCHEMA_VERSION {
             let backup = backup_before_migration(&conn, path, version, CURRENT_SCHEMA_VERSION)?;
             tracing::info!(path = %backup.display(), from_version = version, to_version = CURRENT_SCHEMA_VERSION, "saved database before schema migration");
@@ -71,8 +74,17 @@ fn migrate(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
-fn schema_version(conn: &Connection) -> Result<i64, AppError> {
+pub fn schema_version(conn: &Connection) -> Result<i64, AppError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+}
+
+/// A database migrated by a newer release: running this build on it could corrupt data
+/// the newer schema relies on, so refuse instead.
+pub fn newer_schema(version: i64) -> AppError {
+    AppError::internal(format!(
+        "the database is at schema version {version}, but this Homestock build supports up to \
+         {CURRENT_SCHEMA_VERSION}; install a newer release, or restore a backup taken before the upgrade"
+    ))
 }
 
 fn backup_before_migration(
@@ -96,7 +108,41 @@ fn backup_before_migration(
     let backup_path = parent.join(format!(
         "{filename}.pre-migration-v{from}-to-v{to}-{timestamp}.sqlite3"
     ));
-    let temporary_path = backup_path.with_extension("sqlite3.part");
+    backup_to(conn, &backup_path, Verify::Quick)?;
+    Ok(backup_path)
+}
+
+/// How thoroughly `backup_to` checks the copy before keeping it.
+#[derive(Clone, Copy)]
+pub enum Verify {
+    /// `PRAGMA quick_check`: structure only; fast enough to run before every migration.
+    Quick,
+    /// `PRAGMA integrity_check`: also checks indexes against their tables.
+    Full,
+}
+
+/// Online backup of `conn` to a new file at `dest`, which must not exist. The copy is
+/// written to `<dest>.part` (mode 0600 on Unix), verified, synced and only then renamed
+/// into place, so `dest` is either absent or a complete, checked database.
+pub fn backup_to(conn: &Connection, dest: &Path, verify: Verify) -> Result<(), AppError> {
+    if dest.exists() {
+        return Err(AppError::conflict(format!(
+            "{} already exists",
+            dest.display()
+        )));
+    }
+    let parent = dest
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temporary = dest.as_os_str().to_owned();
+    temporary.push(".part");
+    let temporary_path = PathBuf::from(temporary);
+    // A leftover from an interrupted run is ours (same name) and incomplete.
+    match fs::remove_file(&temporary_path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
 
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -113,16 +159,20 @@ fn backup_before_migration(
         backup.run_to_completion(256, Duration::from_millis(20), None)?;
         drop(backup);
 
-        let check: String = destination.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+        let pragma = match verify {
+            Verify::Quick => "PRAGMA quick_check",
+            Verify::Full => "PRAGMA integrity_check",
+        };
+        let check: String = destination.query_row(pragma, [], |r| r.get(0))?;
         if check != "ok" {
             return Err(AppError::internal(format!(
-                "pre-migration database backup failed integrity check: {check}"
+                "database backup failed its integrity check: {check}"
             )));
         }
         drop(destination);
 
         fs::File::open(&temporary_path)?.sync_all()?;
-        fs::rename(&temporary_path, &backup_path)?;
+        fs::rename(&temporary_path, dest)?;
         fs::File::open(parent)?.sync_all()?;
         Ok(())
     })();
@@ -130,12 +180,12 @@ fn backup_before_migration(
     if let Err(error) = result {
         if let Err(cleanup_error) = fs::remove_file(&temporary_path) {
             if cleanup_error.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(path = %temporary_path.display(), error = %cleanup_error, "failed to remove incomplete migration backup");
+                tracing::warn!(path = %temporary_path.display(), error = %cleanup_error, "failed to remove incomplete database backup");
             }
         }
         return Err(error);
     }
-    Ok(backup_path)
+    Ok(())
 }
 
 #[cfg(test)]

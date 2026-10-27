@@ -24,6 +24,7 @@ pub fn router(state: AppState) -> Router {
     let photos = ServeDir::new(state.cfg.data_dir.join("photos"));
     Router::new()
         .route("/", get(auth::home))
+        .route("/healthz", get(health))
         .route("/login", get(auth::login_page).post(auth::login))
         .route("/setup", post(auth::setup))
         .route("/logout", post(auth::logout))
@@ -123,4 +124,71 @@ pub fn router(state: AppState) -> Router {
 /// HTMX-aware helper: true when the request came from hx-get/hx-post.
 pub fn is_htmx(h: &axum::http::HeaderMap) -> bool {
     h.contains_key("HX-Request")
+}
+
+/// For the installer and a proxy's health check: 200 once migrations are done and the
+/// database answers. Not counted as activity, so frequent checks don't hold off idle backups.
+async fn health(
+    axum::extract::State(st): axum::extract::State<AppState>,
+) -> Result<&'static str, crate::error::AppError> {
+    st.db
+        .call(|c| Ok(c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))?))
+        .await?;
+    Ok("ok")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{activity::Activity, config::Config, db::Db};
+    use axum::{body::Body, http::Request};
+    use std::{
+        fs,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn health_check_answers_without_counting_as_activity() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("homestock-health-test-{suffix}"));
+        fs::create_dir_all(&dir).expect("create test directory");
+        let cfg: Config = toml::from_str(&format!(
+            "bind = \"127.0.0.1:0\"\ndata_dir = \"{}\"\n[backup]\n",
+            dir.display()
+        ))
+        .expect("parse config");
+        let activity = Arc::new(Activity::default());
+        let state = AppState {
+            db: Db::open(&cfg.database_path()).expect("open database"),
+            cfg: Arc::new(cfg),
+            activity: activity.clone(),
+            passwords: Default::default(),
+        };
+        let app = router(state);
+        let get = |uri: &str| Request::get(uri).body(Body::empty()).expect("request");
+
+        let response = app.clone().oneshot(get("/healthz")).await.expect("respond");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], b"ok");
+        assert_eq!(
+            activity.last_request(),
+            0,
+            "health checks must not hold off idle backups"
+        );
+
+        app.oneshot(get("/login")).await.expect("respond");
+        assert!(
+            activity.last_request() > 0,
+            "real requests count as activity"
+        );
+        fs::remove_dir_all(dir).expect("remove test directory");
+    }
 }

@@ -1,6 +1,6 @@
 # Copilot instructions — Homestock
 
-Self-hosted home inventory for a 2–6 person household, served over HTTPS on the LAN. The full spec is in `docs/README.md`. The HTML files in `docs/design/` are visual and behavioural references; do not ship them.
+Self-hosted home inventory for a 2–6 person household, served over HTTPS on the LAN. The full spec is in `docs/DESIGN.md`. The HTML files in `docs/design/` are visual and behavioural references; do not ship them.
 
 ## Stack (decided)
 Rust stable · axum 0.8 + tokio (current_thread) · rusqlite (bundled, backup) with SQLite WAL · askama templates · HTMX (vendored) + small vanilla JS · Tailwind v4 via standalone CLI · argon2 sessions · Docker image in a Proxmox LXC, serving HTTPS directly (PEM cert/key from `config.toml`).
@@ -10,7 +10,7 @@ Architecture, routes, backups and Docker deployment: `docs/IMPLEMENTATION.md`. T
 The app must work with no internet connection. Never add CDN links, web fonts, remote scripts or external API calls. Tailwind runs only at build time: `scripts/build-css.sh` (pinned standalone CLI) generates `static/app.css`, which is not committed; the Dockerfile and CI run it. HTMX is vendored in `static/`.
 
 ## UX
-The UX in `docs/README.md` and the prototype is final. Don't add fields or screens it doesn't have (e.g. there is no item description field; use notes).
+The UX in `docs/DESIGN.md` and the prototype is final. Don't add fields or screens it doesn't have (e.g. there is no item description field; use notes).
 
 ## Rust conventions
 - All DB access goes through `Db::call(|conn| …)` (spawn_blocking). Multi-statement writes use a transaction.
@@ -35,7 +35,7 @@ The UX in `docs/README.md` and the prototype is final. Don't add fields or scree
 - Backups: online SQLite backup only when dirty (`PRAGMA data_version`) and idle; stage complete pending backups locally (keep three). A separate LXC systemd timer syncs them and photos to the NAS only when the mount and sentinel are present; app startup must not depend on NAS availability.
 
 ## UI rules
-- Use the tokens in README → Design tokens via CSS variables on `:root` / `[data-theme=dark]`, exposed through Tailwind v4 `@theme inline`. Do not hard-code colours in components.
+- Use the tokens in DESIGN.md → Design tokens via CSS variables on `:root` / `[data-theme=dark]`, exposed through Tailwind v4 `@theme inline`. Do not hard-code colours in components.
 - Font: Helvetica Neue / system UI. Use `tabular-nums` for every quantity.
 - Radii: 14 buttons/inputs, 18 cards, 24 sheets, full for pills/badges.
 - Touch targets ≥ 44px; steppers 52–56px; inputs use a 16px font.

@@ -29,9 +29,9 @@ impl Activity {
 
 /// `.layer(axum::middleware::from_fn_with_state(activity.clone(), track))`
 pub async fn track(State(a): State<Arc<Activity>>, req: Request, next: Next) -> Response {
-    // Static/photo fetches don't count as “usage”.
+    // Static/photo fetches and health checks don't count as “usage”.
     let p = req.uri().path();
-    if !p.starts_with("/static/") && !p.starts_with("/photos/") {
+    if !p.starts_with("/static/") && !p.starts_with("/photos/") && p != "/healthz" {
         a.touch();
     }
     next.run(req).await
