@@ -4,6 +4,6 @@
   "description": "Captures the documentation screenshots; run scripts/screenshots/run.sh",
   "type": "module",
   "dependencies": {
-    "puppeteer-core": "24.43.1"
+    "puppeteer-core": "25.16.0"
   }
 }
