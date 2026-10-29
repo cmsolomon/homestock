@@ -53,7 +53,7 @@ Homestock runs as a single Docker container on any 64-bit Linux machine, **x86-6
 The installer sets up everything else, including Docker itself on Debian and Ubuntu:
 
 ```sh
-curl -fsSLO https://github.com/cmsolomon/homestock/releases/latest/download/install.sh
+curl -fsSLO https://github.com/ntyndall1/homestock/releases/latest/download/install.sh
 sudo bash install.sh
 ```
 

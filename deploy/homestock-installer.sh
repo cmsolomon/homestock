@@ -244,10 +244,10 @@ fi
 
 # --- the app's user on this host: owns the data, and runs the NAS copy (systemd needs a name) -
 if ! getent group "$gid" >/dev/null; then
-  groupadd --system --gid "$gid" homestock
+  groupadd --gid "$gid" homestock
 fi
 if ! getent passwd "$uid" >/dev/null; then
-  useradd --system --uid "$uid" --gid "$gid" --no-create-home --home-dir /nonexistent \
+  useradd --uid "$uid" --gid "$gid" --no-create-home --home-dir /nonexistent \
     --shell /usr/sbin/nologin homestock
 fi
 
@@ -476,7 +476,7 @@ if [[ -n "$snapshot" ]]; then
 fi
 
 # --- tools: homestock-upgrade and homestock-admin, set up for this install -----------------
-repo="${HOMESTOCK_REPO:-cmsolomon/homestock}"
+repo="${HOMESTOCK_REPO:-ntyndall1/homestock}"
 [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "invalid HOMESTOCK_REPO: $repo"
 install_tool() { # install_tool SOURCE NAME
   sed -e "s|^INSTALL_DIR=.*|INSTALL_DIR=$install_dir  # set by the installer|" \

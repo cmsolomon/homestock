@@ -74,11 +74,26 @@ else
     [[ -z "$expected" || "$running" == "$expected" ]] \
       || warn "running $running, but .env names $expected; re-run the installer to apply it"
   fi
-  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$scheme://127.0.0.1:$port/healthz" 2>/dev/null || true)"
-  if [[ "$code" == 200 ]]; then
-    ok "answering on $scheme://127.0.0.1:$port"
+  read -r -a host_ips <<< "$(hostname -I 2>/dev/null)"
+  health_url=""
+  tested_ips=()
+  for ip in "${host_ips[@]}"; do
+    [[ "$ip" == 127.* || "$ip" == ::1 ]] && continue
+    health_host="$ip"
+    [[ "$ip" == *:* ]] && health_host="[$ip]"
+    health_url="$scheme://$health_host:$port"
+    tested_ips+=("$ip")
+    code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$health_url/healthz" 2>/dev/null || true)"
+    [[ "$code" == 200 ]] && break
+  done
+  if [[ "${code:-}" == 200 ]]; then
+    ok "answering on $health_url"
+  elif [[ ${#tested_ips[@]} -eq 0 ]]; then
+    fail "could not determine a non-loopback IP address for the health check"
+    fix "check the host's network interfaces, then run sudo homestock-doctor again"
   else
-    fail "no healthy answer on $scheme://127.0.0.1:$port/healthz (HTTP ${code:-none})"; fix "docker logs --tail 40 homestock"
+    fail "no healthy answer at $health_url/healthz (HTTP ${code:-none}; tried ${tested_ips[*]})"
+    fix "docker logs --tail 40 homestock"
   fi
   if [[ "${state%% *}" == running ]]; then
     db_schema="$(in_container database-version)"

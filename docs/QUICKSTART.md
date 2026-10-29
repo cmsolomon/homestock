@@ -23,7 +23,7 @@ Check your architecture with `uname -m`. It should say `x86_64` or `aarch64`.
 
 ```sh
 sudo apt-get update && sudo apt-get install -y curl    # if curl is missing
-curl -fsSLO https://github.com/cmsolomon/homestock/releases/latest/download/install.sh
+curl -fsSLO https://github.com/ntyndall1/homestock/releases/latest/download/install.sh
 sudo bash install.sh
 ```
 

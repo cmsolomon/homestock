@@ -17,7 +17,7 @@ COPY templates ./templates
 RUN cargo build --release --locked
 
 FROM debian:trixie-slim
-RUN useradd --system --uid 10001 --no-create-home homestock
+RUN useradd --uid 10001 --no-create-home homestock
 WORKDIR /opt/homestock
 COPY --from=builder /build/target/release/homestock /usr/local/bin/homestock
 COPY static ./static

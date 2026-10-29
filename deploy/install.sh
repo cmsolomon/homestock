@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Homestock bootstrap installer: installs Homestock, or brings an existing install up to date.
 #
-#   curl -fsSLO https://github.com/cmsolomon/homestock/releases/latest/download/install.sh
+#   curl -fsSLO https://github.com/ntyndall1/homestock/releases/latest/download/install.sh
 #   sudo bash install.sh [--version X.Y.Z] [installer options…]
 #
 # It downloads a pinned, checksum-verified cosign, uses it to check that the release's
@@ -13,7 +13,7 @@
 # that install, so upgrading is: sudo homestock-upgrade [--check | --version X.Y.Z] [--yes]
 set -euo pipefail
 
-REPO="${HOMESTOCK_REPO:-cmsolomon/homestock}"   # a fork can point this at itself
+REPO="${HOMESTOCK_REPO:-ntyndall1/homestock}"   # a fork can point this at itself
 INSTALL_DIR=/opt/homestock
 COSIGN_VERSION=v3.1.3
 OIDC_ISSUER=https://token.actions.githubusercontent.com

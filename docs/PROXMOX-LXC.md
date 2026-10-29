@@ -47,7 +47,7 @@ in the container, so `sudo` isn't needed:
 
 ```sh
 apt-get update && apt-get install -y curl
-curl -fsSLO https://github.com/cmsolomon/homestock/releases/latest/download/install.sh
+curl -fsSLO https://github.com/ntyndall1/homestock/releases/latest/download/install.sh
 bash install.sh
 ```
 
