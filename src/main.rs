@@ -14,6 +14,8 @@ mod security;
 use cli::Command;
 use std::{net::SocketAddr, process::ExitCode, sync::Arc, time::Duration};
 
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: db::Db,

@@ -20,6 +20,7 @@ pub struct CurrentUser {
     pub is_admin: bool,
     pub theme: String,
     pub must_change_pw: bool,
+    pub version: &'static str,
 }
 
 pub fn hash(pw: &str) -> Result<String, AppError> {
@@ -93,6 +94,7 @@ pub fn lookup_session(
                         is_admin: r.get(2)?,
                         theme: r.get(3)?,
                         must_change_pw: r.get(4)?,
+                        version: crate::APP_VERSION,
                     },
                     r.get::<_, i64>(5)?,
                 ))

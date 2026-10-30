@@ -158,9 +158,12 @@ pub async fn present(req: Request, next: Next) -> Response {
             redirect
         }
         Presentation::Toast(msg) if !htmx => {
-            let page = ErrorPage { message: msg }
-                .render()
-                .unwrap_or_else(|_| "Something went wrong".into());
+            let page = ErrorPage {
+                message: msg,
+                version: crate::APP_VERSION,
+            }
+            .render()
+            .unwrap_or_else(|_| "Something went wrong".into());
             (response.status(), Html(page)).into_response()
         }
         _ => response,
@@ -174,6 +177,7 @@ const FLASH_COOKIE: &str = "hs_flash";
 #[template(path = "error.html")]
 struct ErrorPage {
     message: String,
+    version: &'static str,
 }
 
 /// Path and query of the Referer, so the redirect always stays on this origin.
@@ -313,6 +317,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let html = body(response).await;
         assert!(html.starts_with("<!doctype html>") && html.contains("Not found"));
+        assert!(html.contains(&format!("v{}", crate::APP_VERSION)));
     }
 
     #[test]

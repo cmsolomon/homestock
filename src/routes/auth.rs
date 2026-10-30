@@ -20,6 +20,7 @@ struct LoginPage {
     names: Vec<String>,
     first_run: bool,
     error: Option<String>,
+    version: &'static str,
 }
 
 async fn page(st: &AppState, error: Option<String>) -> Result<Html<String>, AppError> {
@@ -41,6 +42,7 @@ async fn page(st: &AppState, error: Option<String>) -> Result<Html<String>, AppE
             names,
             first_run,
             error,
+            version: crate::APP_VERSION,
         }
         .render()?,
     ))
@@ -258,11 +260,25 @@ fn session_cookie(token: &str, secure: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::session_cookie;
+    use super::{session_cookie, LoginPage};
+    use askama::Template;
 
     #[test]
     fn secure_cookie_flag_follows_config() {
         assert!(session_cookie("token", true).contains("; Secure;"));
         assert!(!session_cookie("token", false).contains("; Secure;"));
+    }
+
+    #[test]
+    fn login_page_shows_the_application_version() {
+        let html = LoginPage {
+            names: Vec::new(),
+            first_run: true,
+            error: None,
+            version: crate::APP_VERSION,
+        }
+        .render()
+        .expect("render login page");
+        assert!(html.contains(&format!("v{}", crate::APP_VERSION)));
     }
 }
